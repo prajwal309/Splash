@@ -36,65 +36,93 @@ def BoxFit(Time, T0=None, TDur=None, Delta=100):
     return TransitModel
 
 
-def SingleEventSearch(JD_UTC, Flux, Parameters, ParametersName, SearchFileLocation, STD, SaveFolder, MinimizeMethod):
+def SingleEventSearch(ParamValues, ParamName, SpecParam, STD, SaveFolder):
+        '''
+        This function identifies the best transit candidates for each night using SVD
+        #############################################################################
+        Input
+        ==================
+        ParamValues: The values that are to be used for parameters
+        ParamName: Name of the parameter to identify which basis vector is used.
+        SpecParam:The parameters from Search.ini which contains the transit duration
 
-        #Parsing the result for the transit search parameters from SearchParams.ini
-        SearchContent = open(SearchFileLocation, "r+").readlines()
-        TDur_Values = SearchContent[1].split(":")[1].split("#")[0].split(",")           #Constrains on the transit duration
-        TDur_Values = [float(i)/(24.) for i in TDur_Values]
+        STD:Standard deviation of the data
+        OutputDir: Directory for the outputs to be stored.
+        '''
 
-        TStepNorm =float(SearchContent[2].split(":")[1].split("#")[0])                       #Stepsize of the T0
-        TStep = min(TDur_Values)/TStepNorm
+        #Lower and upper bound for the transit duration in minutes
+        TDur_Values = [float(Item) for Item in SpecParam['TransitDuration'].split(",")]
 
-        if TStep<0:
-            TStep=np.median(np.diff(JD_UTC))
+        #Convert transit duration in to days
+        TDur_Values = [float(i)/(24.*60.0) for i in TDur_Values]
+
+        #Stepsize of the T0
+        TStep =float(SpecParam['TStepSize'])/(24.0*60.0)
 
         if TStep>max(TDur_Values):
             raise NameError("TStep should be smaller than the transit duration")
-        Parameters2Consider = SearchContent[3].split(":")[1].split("#")[0].split(",")   #Correlation among the parameters
-        Parameters2Consider= [Item.replace(" ", "").replace("\t","") for Item in Parameters2Consider]
 
-        NumParameters=int(SearchContent[4].split(":")[1].split("#")[0])                 #Number of parameters to consider
-        NumParameters=min([len(Parameters2Consider), NumParameters])
+        #Basis vectors to consider for detrending
+        Parameters2Consider = SpecParam['Params'].split(",")
+
+        #Number of parameters to consider
+        NumParameters = int(SpecParam['Combination'])
+        NumParameters = min([len(Parameters2Consider), NumParameters])
+        DetrendParam = SpecParam['Params'].split(",")
+
+        BasisVector = np.zeros((len(ParamValues[:,0]), len(DetrendParam)))
+
+
+        for Count, ParamItem in enumerate(DetrendParam):
+            if "T" == ParamItem.upper() or "JD" == ParamItem.upper():
+                ColumnIndex = 0
+            else:
+                print("ParamItem:", ParamItem)
+                print("ParamName:", ParamName)
+                ColumnIndex = np.where(ParamItem.upper() == ParamName)
+                if len(ColumnIndex)<0:
+                    raise NameError("Mismatch in the header and the columns")
+                else:
+                    ColumnIndex = ColumnIndex[0][0]
+                    print(ColumnIndex)
+
+            BasisVector[:,Count] = ParamValues[:,ColumnIndex]
+
+
+
+        #the order of the polynomial for detrending
+        PolyOrder = int(SpecParam['PolynomialOrder'])
 
         #Two is the preferred number of parameters
-        if NumParameters>3.01:
-            print("Use three parameters at most")
+        if NumParameters>3:
+            warn("Use three parameters at most for the best results")
 
-        PolynomialOrder = int(SearchContent[5].split(":")[1].split("#")[0])             #the order of the polynomial
+        if PolyOrder>3:
+            warn("Use use larger than three order polynomial for the best results")
 
-        NumTrials = int(SearchContent[7].split(":")[1].split("#")[0])                   #Num of sampling
-        NCPUs = int(SearchContent[8].split(":")[1].split("#")[0])                       #Num of sampling
-        IntFancyPlot = int(SearchContent[9].split(":")[1].split("#")[0])                   #Plotting Frequency. 1 is the standard diagnostic plot.
-
-        if IntFancyPlot == 0:
-            FancyPlot = False
-        else:
-            FancyPlot = True
-
+        #Number of CPU cores to be used
+        NCPUs = int(SpecParam['NCPUs'])
 
         if NCPUs==-1:
             NUM_CORES = mp.cpu_count()
-        elif NCPUs>0 and NCPUs<33:
+        elif NCPUs>0 and NCPUs<64:
             NUM_CORES = int(NCPUs)
-        else:
-            print("The values of NCPUs has to be -1 or values between 0 to 33")
-            raise("Error in determining the number of cores.")
+
+        print("Using %d cores." %NUM_CORES)
 
 
-        #Unpacking the values
-        NormalizedFlux, Err, XShift, YShift, FWHM_X,  FWHM_Y, FWHM,	SKY, AIRMASS = np.transpose(Parameters)
 
 
-        #Create a combination for baseline continuum model
-        #ParamCombinations = list(itertools.combinations(Parameters2Consider,NumParameters))
 
         ParamCombinations = []
         for i in range(1,NumParameters+1):
-            ParamCombinations.extend(list(itertools.combinations(Parameters2Consider,i)))
+            ParamCombinations.extend(list(itertools.combinations(DetrendParam,i)))
+
+        print("The detrend parameters were given by::", DetrendParam)
+        input("Crash here...")
 
         #Find the segments in the data that are continuously observed with gaps less than 2.4 hours
-        JD_UTC = np.array(JD_UTC)
+        Time = np.array(JD_UTC)
         Flux = np.array(Flux)
 
         Diff1D = np.diff(JD_UTC)
@@ -113,10 +141,10 @@ def SingleEventSearch(JD_UTC, Flux, Parameters, ParametersName, SearchFileLocati
             FluxChunk = Flux[Start:Stop]
             FluxChunk-=np.mean(FluxChunk)
 
-            #If sigma clip have to clip all data points
+            #SigmaClip the data
             OutliersIndex = SigmaClip(TimeChunk, FluxChunk, SigmaValue=5.0)
 
-            if np.sum(OutliersIndex)>0.5:
+            if np.sum(OutliersIndex)>0:
                 T0_min = int(min(TimeChunk))
                 plt.figure()
                 plt.plot(TimeChunk[~OutliersIndex]-T0_min, FluxChunk[~OutliersIndex], "ko")
@@ -160,18 +188,19 @@ def SingleEventSearch(JD_UTC, Flux, Parameters, ParametersName, SearchFileLocati
             LocalSTDArray = np.zeros(len(T0_Range))
             UncertaintyArray = np.ones(len(T0_Range))*1e300
 
-
             N_OPERATIONS = len(T0_Range)*len(ParamCombinations)
 
+            #Flags to determine the best light curve for the night
             BestChiSqr = np.inf
             BestSTD = np.inf
 
-            #To save the parameters
+            #number of cotrending basis vectors being used
             CBVLength = NumParameters*(PolynomialOrder+1)+3
 
             ParamMatrix = np.zeros((len(T0_Range),CBVLength))
             ParamNameMatrix = np.chararray((len(T0_Range),NumParameters))
 
+            Residuals = np.zeros
 
 
             for counter in range(int(N_OPERATIONS/NUM_CORES)+1):

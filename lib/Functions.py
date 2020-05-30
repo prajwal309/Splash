@@ -13,7 +13,82 @@ import batman
 
 
 def ParseFile(Location):
-    
+    '''
+    This function parse Search Parameters initialization file
+
+    Input
+    #####################################
+    Location of the search initialization file
+
+    Output
+    #####################################
+    The parameters in dictionary format
+    '''
+
+    with open(Location,'r') as f:
+        Data = f.readlines()
+
+    ValueDict = {}
+
+    for Line in Data[1:]:
+        LineItem = Line.split("#")[0]
+        Key, Value = LineItem.split(":")
+        ValueDict[Key] = Value.replace(" ", "")
+
+    return ValueDict
+
+
+
+def ReadData(Location, TargetName):
+    '''
+    This function reads the input file
+
+    Input
+    #####################################
+    Location: Path to the folder containing the light curve.
+    TargetName: Name of the target for identifying the files.
+
+    Output
+    #####################################
+    Name of the parameters
+    Values of the parameters
+    '''
+
+    FileList = glob.glob(Location+"/*%s.txt*" %TargetName)
+    NumFiles = len(FileList)
+
+    if NumFiles == 0:
+        raise NameError("No Files found")
+
+
+    AllData = []
+
+    for Counter,FileItem in enumerate(FileList):
+        #Headers
+        if Counter ==0 :
+            Header = open(FileItem,'r').readline().upper()
+            CSVFileFlag = "," in Header
+            if CSVFileFlag:
+                TempParameter = Header.split(",")
+            else:
+                TempParameter = Header.split("\t")
+
+            ParamName = []
+
+            for Param in TempParameter:
+                ParamName.append(Param.replace(" ", "").replace("#","").replace("\n",""))
+
+
+        try:
+            Data = np.loadtxt(FileItem,skiprows=1, delimiter=",")
+        except:
+            Data = np.loadtxt(FileItem, skiprows=0)
+
+        AllData.extend(Data)
+
+    AllData = np.array(AllData)
+    ParamName = np.array(ParamName)
+    return ParamName, AllData
 
 
 def SigmaClip(Time, Flux, SigmaValue=3.0):
