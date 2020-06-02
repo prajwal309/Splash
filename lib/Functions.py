@@ -8,7 +8,6 @@ import corner
 from time import time
 import os
 import glob
-from fpdf import FPDF
 import batman
 
 
@@ -53,6 +52,8 @@ def ReadData(Location, TargetName):
     Name of the parameters
     Values of the parameters
     '''
+    if len(Location) <1 or len(TargetName)<1:
+        raise NameError("No location or target available")
 
     FileList = glob.glob(Location+"/*%s.txt*" %TargetName)
     NumFiles = len(FileList)
@@ -113,28 +114,11 @@ def SigmaClip(Time, Flux, SigmaValue=3.0):
     return Index
 
 
-def CreateUniqueID(FolderName=None):
+def CreateOutputDir(FolderName=None):
     '''
     This function creates a unique ID and its corresponding dictionary.
     '''
-    if FolderName:
-        ID = FolderName
-    else:
-        ID = hex(int(time()*1000)).replace('0x16',"")
-    OutputDir = os.getcwd()+"/Output"
-
-    if not(os.path.exists(OutputDir)):
-        os.system("mkdir %s" %OutputDir.replace(" ", "\ "))
-
-    ResultDir = OutputDir+"/"+ID
-
-    if not(os.path.exists(ResultDir)):
-        print("Creating the folder.")
-        os.system("mkdir %s" %ResultDir.replace(" ", "\ "))
-    else:
-        print("The output folder already exists. Deleting all previous files and folders within it.")
-        os.system("rm  -rf %s/*" %ResultDir.replace(" ", "\ "))
-    return ID, ResultDir
+    
 
 
 def SplineFlattening(Time, Flux, period, NIter = 4, StdCutOff=2.5, poly=3, knot=1):

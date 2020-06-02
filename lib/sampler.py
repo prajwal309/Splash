@@ -36,18 +36,26 @@ def FitFunction(CBVs,TimeChunk, FluxChunk, FitVariables, PolynomialOrder, Length
     return Residual
 
 
-def SVD_Solver(TimeChunk, FluxChunk, FitVariables, PolynomialOrder, LengthModelParam, TStep, T0_Value, TDur_Values, STD, NumTrials):
+def SVD_Solver(TimeChunk, FluxChunk, FitVariables, PolynomialOrder, LengthModelParam, T0_Range, TDurArray):
     '''
     This function uses SVD to find the least square fit using the variables
     ######################################################################
     Input ParametersName
     ====================
-    TimeChunk
-
+    TimeChunk: The chunk of the data to be fitted
+    FluxChunk: The chunk of the flux to be fitted
+    FitVariables: The variables that are to be fitted.
+    PolynomialOrder: The order to be used for the parameter
+    LengthModelParam: The length of the parameters
+    T0_Range: The range of T0 values
+    TDur: The length of T0 Duration values
     '''
 
+    print("Inside the SVD solver")
     #Generate a new fit variables matrix
     CBVMatrix = np.zeros((len(TimeChunk), (PolynomialOrder+1)*(LengthModelParam)+1))
+
+
     for OuterCounter in range(LengthModelParam):
         RowArray = FitVariables[:,OuterCounter]
         TempArray = np.ones(len(TimeChunk))
@@ -64,34 +72,40 @@ def SVD_Solver(TimeChunk, FluxChunk, FitVariables, PolynomialOrder, LengthModelP
     Uncertainty = np.inf
 
 
-    T0_LocalValues = [T0_Value]
+    ResidualArray = np.zeros((len(T0_Range), len(TDurArray)))
+    UncertaintyArray = np.zeros((len(T0_Range), len(TDurArray)))
+    CoeffMatrix = np.zeros((10, len(T0_Range), len(TDurArray)))
 
-    TDur_Values = np.arange(min(TDur_Values), max(TDur_Values), 3./(24*60))
-    Values = list(itertools.product(T0_LocalValues, TDur_Values))
+    for T0_Counter, T0_Local in enumerate(T0_Range):
+        for TDur_Counter, TDur_Local in enumerate(TDurArray):
 
-    for T0_Local, TDur_Local in Values:
-        TransitModel = BoxFit(TimeChunk, T0=T0_Local, TDur=TDur_Local, Delta=1e-3)
-        CBVMatrix[:, -1] = TransitModel
+            TransitModel = BoxFit(TimeChunk, T0=T0_Local, TDur=TDur_Local, Delta=1e-3)
+            CBVMatrix[:, -1] = TransitModel
 
-        #Custom SVD
-        CalcCoef, Cov, Residual = CustomSVDSolver(CBVMatrix, FluxChunk)
+            #Custom SVD
+            CalcCoef, Cov, Residual = CustomSVDSolver(CBVMatrix, FluxChunk)
 
-        if BestResidual>Residual:
-            BestResidual = Residual
-            Uncertainty = np.sqrt(Cov[-1][-1])/1000.0
+            if BestResidual>Residual:
+                BestResidual = Residual
+                Uncertainty = np.sqrt(Cov[-1][-1])/1000.0
 
-            Model = np.matmul(CBVMatrix,CalcCoef)
+                Model = np.matmul(CBVMatrix,CalcCoef)
 
-            #Construct the Best Parameters
-            BestParameters = np.zeros(LengthModelParam*(PolynomialOrder+1)+3)
-            CalcCoef[UnnecessaryDCIndex]=0.0
-            #Reverse the storage:
-            for i in range(LengthModelParam):
-                    BestParameters[i*(PolynomialOrder+1):(i+1)*(PolynomialOrder+1)]=CalcCoef[i*(PolynomialOrder+1):(i+1)*(PolynomialOrder+1)][::-1]
-            BestParameters[-3] = T0_Local
-            BestParameters[-2] = TDur_Local
-            BestParameters[-1] = CalcCoef[-1]*1e-3
-            BestModel = np.dot(CalcCoef, CBVMatrix.T)
+                #Construct the Best Parameters
+                BestParameters = np.zeros(LengthModelParam*(PolynomialOrder+1)+3)
+                CalcCoef[UnnecessaryDCIndex]=0.0
+                #Reverse the storage:
+                for i in range(LengthModelParam):
+                        BestParameters[i*(PolynomialOrder+1):(i+1)*(PolynomialOrder+1)]=CalcCoef[i*(PolynomialOrder+1):(i+1)*(PolynomialOrder+1)][::-1]
+                BestParameters[-3] = T0_Local
+                BestParameters[-2] = TDur_Local
+                BestParameters[-1] = CalcCoef[-1]*1e-3
+                BestModel = np.dot(CalcCoef, CBVMatrix.T)
+
+    #Looks at the figure
+    plt.figure()
+    plt.imshow(ResidualArray, cmap="viridis")
+    plt.show()
 
     return BestResidual, BestParameters, Uncertainty
 

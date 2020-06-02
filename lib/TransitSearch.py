@@ -29,14 +29,16 @@ def CloseEnough(Value1, Value2, Tol=1e-8):
 
 
 def BoxFit(Time, T0=None, TDur=None, Delta=100):
-    #Find the section of the transit
+    '''
+    Create a transit box model using box
+    '''
     TransitIndex = np.abs((Time-T0))<TDur/2
     TransitModel = np.zeros(len(Time))
     TransitModel[TransitIndex]-=Delta
     return TransitModel
 
 
-def SingleEventSearch(ParamValues, ParamName, SpecParam, STD, SaveFolder):
+def SingleEventSearch(ParamValues, ParamName, SpecParam, SaveFolder):
         '''
         This function identifies the best transit candidates for each night using SVD
         #############################################################################
@@ -45,8 +47,6 @@ def SingleEventSearch(ParamValues, ParamName, SpecParam, STD, SaveFolder):
         ParamValues: The values that are to be used for parameters
         ParamName: Name of the parameter to identify which basis vector is used.
         SpecParam:The parameters from Search.ini which contains the transit duration
-
-        STD:Standard deviation of the data
         OutputDir: Directory for the outputs to be stored.
         '''
 
@@ -55,11 +55,16 @@ def SingleEventSearch(ParamValues, ParamName, SpecParam, STD, SaveFolder):
 
         #Convert transit duration in to days
         TDur_Values = [float(i)/(24.*60.0) for i in TDur_Values]
+        TDurStepSize = float(SpecParam['TDurStepSize'])/(24.*60.0)
+
+        #Create an array for transit duration
+        TDurArray = np.arange(TDur_Values[0],TDur_Values[1]+TDurStepSize, TDurStepSize)
+
 
         #Stepsize of the T0
-        TStep =float(SpecParam['TStepSize'])/(24.0*60.0)
+        T0StepSize =float(SpecParam['TStepSize'])/(24.0*60.0)
 
-        if TStep>max(TDur_Values):
+        if len(TDurArray)<2:
             raise NameError("TStep should be smaller than the transit duration")
 
         #Basis vectors to consider for detrending
@@ -77,8 +82,6 @@ def SingleEventSearch(ParamValues, ParamName, SpecParam, STD, SaveFolder):
             if "T" == ParamItem.upper() or "JD" == ParamItem.upper():
                 ColumnIndex = 0
             else:
-                print("ParamItem:", ParamItem)
-                print("ParamName:", ParamName)
                 ColumnIndex = np.where(ParamItem.upper() == ParamName)
                 if len(ColumnIndex)<0:
                     raise NameError("Mismatch in the header and the columns")
@@ -111,25 +114,23 @@ def SingleEventSearch(ParamValues, ParamName, SpecParam, STD, SaveFolder):
         print("Using %d cores." %NUM_CORES)
 
 
-
-
-
         ParamCombinations = []
         for i in range(1,NumParameters+1):
             ParamCombinations.extend(list(itertools.combinations(DetrendParam,i)))
 
-        print("The detrend parameters were given by::", DetrendParam)
-        input("Crash here...")
+        print("The parameter combination is given by:")
+        print(len(ParamCombinations))
+
 
         #Find the segments in the data that are continuously observed with gaps less than 2.4 hours
-        Time = np.array(JD_UTC)
-        Flux = np.array(Flux)
+        Time = ParamValues[:,0]
+        Flux = ParamValues[:,1]
 
-        Diff1D = np.diff(JD_UTC)
+        Diff1D = np.diff(Time)
         Index = np.concatenate((np.array([False]), Diff1D>0.2))
         Locations = np.where(Index)[0]
 
-
+        #To mark the starting chunk of the data
         Start = 0
         for ChunkCount in range(len(Locations)+1):
             if ChunkCount<len(Locations):
@@ -137,9 +138,10 @@ def SingleEventSearch(ParamValues, ParamName, SpecParam, STD, SaveFolder):
             else:
                 Stop = len(Flux)
 
-            TimeChunk = JD_UTC[Start:Stop]
+            TimeChunk = Time[Start:Stop]
             FluxChunk = Flux[Start:Stop]
             FluxChunk-=np.mean(FluxChunk)
+            BasisChunk = BasisVector[Start:Stop, :]
 
             #SigmaClip the data
             OutliersIndex = SigmaClip(TimeChunk, FluxChunk, SigmaValue=5.0)
@@ -160,14 +162,8 @@ def SingleEventSearch(ParamValues, ParamName, SpecParam, STD, SaveFolder):
             TimeChunk = TimeChunk[~OutliersIndex]
             FluxChunk = FluxChunk[~OutliersIndex]
 
-            NormalizedFlux_Chunk = NormalizedFlux[Start:Stop][~OutliersIndex]
-            XShift_Chunk = XShift[Start:Stop][~OutliersIndex]
-            YShift_Chunk = YShift[Start:Stop][~OutliersIndex]
-            FWHM_X_Chunk = FWHM_X[Start:Stop][~OutliersIndex]
-            FWHM_Y_Chunk = FWHM_Y[Start:Stop][~OutliersIndex]
-            FWHM_Chunk = FWHM[Start:Stop][~OutliersIndex]
-            SKY_Chunk = SKY[Start:Stop][~OutliersIndex]
-            AIRMASS_Chunk = AIRMASS[Start:Stop][~OutliersIndex]
+            BasisChunk = BasisChunk[~OutliersIndex,:]
+
 
             #The length for the vector
             LENGTH = len(TimeChunk)
@@ -175,33 +171,46 @@ def SingleEventSearch(ParamValues, ParamName, SpecParam, STD, SaveFolder):
             #Updating Start
             Start = Stop
 
-            T0_Range = np.arange(min(TimeChunk), max(TimeChunk), TStep)
+            T0_Range = np.arange(min(TimeChunk), max(TimeChunk), T0StepSize)
             T0_Param_Product = itertools.product(T0_Range, ParamCombinations)
 
-            ReducedChiSqrArray = np.ones(len(T0_Range))*1e300
-            TransitDepthArray = np.ones(len(T0_Range))*1e300
-            TDurArray = np.ones(len(T0_Range))*1e300
-            ResidualArray = np.ones(len(T0_Range))*1e300
-            SNRTrackerArray = np.ones(len(T0_Range))*-1e300
+            #Save 2 dimensional array
+            ResidualArray = np.ones((len(T0_Range), len(TDurArray)))*1e300
+            ReducedChiSqrArray = np.ones((len(T0_Range), len(TDurArray)))*1e300
+            TransitDepthArray = np.ones((len(T0_Range), len(TDurArray)))*1e300
 
-            STRSignalArray = np.zeros(len(T0_Range))
-            LocalSTDArray = np.zeros(len(T0_Range))
-            UncertaintyArray = np.ones(len(T0_Range))*1e300
+            STRSignalArray = np.ones((len(T0_Range), len(TDurArray)))*1e300
+            LocalSTDArray = np.ones((len(T0_Range), len(TDurArray)))*1e300
 
-            N_OPERATIONS = len(T0_Range)*len(ParamCombinations)
+            #The number of expected operations
+            N_OPERATIONS = len(ParamCombinations)
 
-            #Flags to determine the best light curve for the night
+            #Flags to determine the daily best transit candidate model
             BestChiSqr = np.inf
             BestSTD = np.inf
 
             #number of cotrending basis vectors being used
-            CBVLength = NumParameters*(PolynomialOrder+1)+3
+            CBVLength = NumParameters*(PolyOrder+1)+3
 
             ParamMatrix = np.zeros((len(T0_Range),CBVLength))
             ParamNameMatrix = np.chararray((len(T0_Range),NumParameters))
 
-            Residuals = np.zeros
+            #The matrix for each night
+            Residuals = np.zeros((len(T0_Range), len(TDurArray)))
+            Parameters = np.zeros((len(T0_Range), len(TDurArray)))
+            Uncertainty = np.zeros((len(T0_Range), len(TDurArray)))
 
+            print("Just try calling ")
+
+            input("Calling SVD solver next")
+            FitVariables = BasisChunk[:,0:2]
+            _, LengthModelParam = np.shape(FitVariables)
+
+            print("The lenght of th parameter is ", LengthModelParam)
+            input("Wait here...")
+            SVD_Solver(TimeChunk, FluxChunk, FitVariables, PolyOrder, LengthModelParam, T0_Range, TDurArray)
+
+            input("Just trying the fit variables")
 
             for counter in range(int(N_OPERATIONS/NUM_CORES)+1):
                 Tasks = []
@@ -210,7 +219,10 @@ def SingleEventSearch(ParamValues, ParamName, SpecParam, STD, SaveFolder):
                 TDur_Local_List = []
                 TempParamName_List = []
 
+                #Starting the multiprocessing
                 for MPICount in range(NUM_CORES):
+                    print("The value of MPICount:", MPICount)
+
                     try:
                         T0_Value, ModelParameters = next(T0_Param_Product)
                     except:
@@ -220,68 +232,24 @@ def SingleEventSearch(ParamValues, ParamName, SpecParam, STD, SaveFolder):
                         FitVariables = np.zeros((LENGTH,len(ModelParameters)))
                         TempParamName = np.chararray(len(ModelParameters))
                         for ModelCount,param in enumerate(ModelParameters):
+                            print("The model of the count is::", ModelCount)
+                            print("The parameter is given::", param)
+                            input("Wait here...")
                             if "T" in param.upper():
                                 FitVariables[:,ModelCount] = TimeChunk - np.mean(TimeChunk)
                                 TempParamName[ModelCount]='T'
-                            elif "X"==param.upper():
-                                XShiftAssign = XShift_Chunk -np.mean(XShift_Chunk)
-                                FitVariables[:,ModelCount] = XShiftAssign/np.std(XShiftAssign)
-                                TempParamName[ModelCount]='X'
-                            elif "Y" == param.upper():
-                                YShiftAssign = YShift_Chunk -np.mean(YShift_Chunk)
-                                FitVariables[:,ModelCount] = YShiftAssign/np.std(YShiftAssign)
-                                TempParamName[ModelCount]='Y'
-                            elif "XY" == param.upper():
-                                XY = np.sqrt(XShift_Chunk*XShift_Chunk+YShift_Chunk*YShift_Chunk)
-                                XY-= np.mean(XY)
-                                XY=XY/np.std(XY)
-                                FitVariables[:,ModelCount] = XY
-                                TempParamName[ModelCount]='D'
-                            elif "FWHM" in param.upper():
-                                FWHW_Assign = FWHM_Chunk - np.mean(FWHM_Chunk)
-                                FitVariables[:,ModelCount] = FWHW_Assign/np.std(FWHW_Assign)
-                                TempParamName[ModelCount]='F'
-                            elif "SKY" in param.upper():
-                                SKY_Assign = SKY_Chunk - np.mean(SKY_Chunk)
-                                FitVariables[:,ModelCount] = SKY_Assign/np.std(SKY_Assign)
-                                TempParamName[ModelCount]='S'
-                            elif "AIRMASS" in param.upper():
-                                AIRMASS_Assign = AIRMASS_Chunk - np.mean(AIRMASS_Chunk)
-                                FitVariables[:,ModelCount] = AIRMASS_Assign/np.std(AIRMASS_Assign)
-                                TempParamName[ModelCount]='A'
                             else:
                                 print("All the model paratmers are given by::", ModelParam)
                                 print("The parameter in question is::", param.upper())
                                 raise NameError("The parameter to be considered is %s, and it could not be parsed." %(param))
                     LengthModelParam = len(ModelParameters)
 
-                    if MinimizeMethod == 1:
-                        #Implemented for Scipy
-                        Bnds = [[-1.0+0*i, 1.0+0*i] for i in range(CBVLength)]
-                        Bnds[-3] = [T0_Value-max(TDur_Values)/2.0,T0_Value+max(TDur_Values)/2.0]
-                        Bnds[-2] = [TDur_Values[0], TDur_Values[1]]
-                        Bnds[-1] = [0,1e-1]
+                    input("Wait here for the test... ")
+                    #Use SVD to find the least square fit
+                    Tasks.append(CPU_Pool.apply_async(SVD_Solver,(TimeChunk, FluxChunk, FitVariables, PolyOrder, LengthModelParam, T0_Range, TDurArray)))
+                    T0_Local_List.append(T0_Value)
+                    TempParamName_List.append(TempParamName)
 
-                        #Convert into tuple
-                        Bnds = tuple([tuple(Item) for Item in Bnds])
-                        Tasks.append(CPU_Pool.apply_async(MinimizeSampler, (TimeChunk, FluxChunk, FitVariables, PolynomialOrder, LengthModelParam, TStep, T0_Value, NumTrials, TDur_Values, Bnds)))
-                        T0_Local_List.append(T0_Value)
-                        TempParamName_List.append(TempParamName)
-
-
-                    elif MinimizeMethod == 2:
-                        Tasks.append(CPU_Pool.apply_async(SVD_Solver,(TimeChunk, FluxChunk, FitVariables, PolynomialOrder, LengthModelParam, TStep, T0_Value, TDur_Values, STD, NumTrials)))
-                        T0_Local_List.append(T0_Value)
-                        TempParamName_List.append(TempParamName)
-
-                    elif MinimizeMethod == 3:
-                       Tasks.append(CPU_Pool.apply_async(MCMC_Sampler,(TimeChunk, FluxChunk, FitVariables, PolynomialOrder, LengthModelParam, TStep, T0_Value, TDur_Values, STD, NumTrials)))
-                       T0_Local_List.append(T0_Value)
-                       TempParamName_List.append(TempParamName)
-
-                    else:
-                       print("Only 1--> Scipy minimize, 2---> MCMC method is available")
-                       raise("Choose among the three methods.")
 
                 CPU_Pool.close()
                 CPU_Pool.join()
@@ -491,16 +459,6 @@ def SingleEventSearch(ParamValues, ParamName, SpecParam, STD, SaveFolder):
             ScaledSTD = BestSTD*1.0/np.sqrt(NumInABin)
             ErrorSTD = np.ones(len(BinnedTime))*ScaledSTD
 
-            if FancyPlot:
-                import matplotlib as mpl
-                mpl.rc('font',**{'family':'sans-serif', 'serif':['Computer Modern Serif'],'sans-serif':['Helvetica'], 'size':20,'weight':'bold'})
-                mpl.rc('axes',**{'labelweight':'bold', 'linewidth':1.5})
-                mpl.rc('ytick',**{'major.pad':22, 'color':'k'})
-                mpl.rc('xtick',**{'major.pad':10,})
-                mpl.rc('mathtext',**{'default':'regular','fontset':'cm','bf':'monospace:bold'})
-                mpl.rc('text', **{'usetex':True})
-                #mpl.rc('text.latex',preamble=r'\usepackage{cmbright},\usepackage{relsize},'+r'\usepackage{upgreek}, \usepackage{amsmath}')
-                mpl.rc('contour', **{'negative_linestyle':'solid'})
 
 
 

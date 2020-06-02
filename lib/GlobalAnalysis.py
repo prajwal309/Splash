@@ -408,18 +408,6 @@ def GlobalPeriodogram(OutputDir, FancyPlot=True):
 
     RangePresent = (max(TDepth_Uncty_List) - min(TDepth_Uncty_List))>1e-6
 
-    if FancyPlot:
-        import matplotlib as mpl
-        mpl.rc('font',**{'family':'sans-serif', 'serif':['Computer Modern Serif'],'sans-serif':['Helvetica'], 'size':20,'weight':'bold'})
-        mpl.rc('axes',**{'labelweight':'bold', 'linewidth':1.5})
-        mpl.rc('ytick',**{'major.pad':22, 'color':'k'})
-        mpl.rc('xtick',**{'major.pad':10,})
-        mpl.rc('mathtext',**{'default':'regular','fontset':'cm','bf':'monospace:bold'})
-        mpl.rc('text', **{'usetex':True})
-        mpl.rc('text.latex',preamble=r'\usepackage{cmbright},\usepackage{relsize},'+r'\usepackage{upgreek}, \usepackage{amsmath}')
-        mpl.rc('contour', **{'negative_linestyle':'solid'})
-
-
     T0 = int(min(T0_Range_List))
 
 
