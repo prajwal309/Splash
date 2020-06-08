@@ -1,3 +1,7 @@
+'''
+This file contains the important function that is imported within the module
+'''
+
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import LSQUnivariateSpline as spline
@@ -118,7 +122,7 @@ def CreateOutputDir(FolderName=None):
     '''
     This function creates a unique ID and its corresponding dictionary.
     '''
-    
+
 
 
 def SplineFlattening(Time, Flux, period, NIter = 4, StdCutOff=2.5, poly=3, knot=1):

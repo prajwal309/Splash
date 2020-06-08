@@ -1,28 +1,58 @@
+'''
+This file containts the run algorithm for the transit search
+'''
 import matplotlib.pyplot as plt
-from .TransitSearch import *
-from .Functions import ParseFile
-from .LightCurve import Target
+from .splash import Target
 
 
-class TransitSearch():
+class GLS:
+    """
+    Description
+    -----------
 
+    Parameters Name
+    --------------
+
+    Output
+    --------------
+    """
     def __init__(self):
         self.TransitSearchParam = ParseFile("SearchParams.ini")
 
 
-    def LinearSearch(self, Target):
-        '''
-        This method does a night by night basis for the function
-        '''
-        plt.figure()
-        plt.plot(Target.DailyData[0][:,0], Target.DailyData[0][:,1], "ko")
-        plt.show()
-        input("Wait here...")
-        pass
+class LinearSearch(self, Target):
+    '''
+    Description
+    ------------
+
+    Input Parameters
+    ---------------
+    This method does a night by night basis for the function
+    '''
+    pass
 
 
-    def PeriodicSearch(self, Target):
+
+class PeriodicSearch(self, Target):
+    '''
+    This function utilizes the linear search information and
+
+    '''
+
+    def ketu(Target)
         '''
-        This function utilizes the linear search information and
+        Algorithm developed by Lionel
         '''
         pass
+
+    def Likelihood(Target)
+        '''
+        Algorithm to be developed by Prajwal
+        '''
+
+    def Likelihood(Target)
+        '''
+        Algorithm to be developed by Prajwal
+        '''
+            
+    pass
