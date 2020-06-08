@@ -1,3 +1,8 @@
+'''
+Will contain the core functionality of reading
+the data from the Cambridge Pipeline.
+'''
+
 import numpy as np
 from .Functions import ReadData, ParseFile
 from time import time

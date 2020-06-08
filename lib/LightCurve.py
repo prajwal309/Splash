@@ -86,7 +86,6 @@ class Target:
         '''
         This method normalizes the flux
         '''
-        input("Normalized Flux")
         pass
 
 

@@ -1,6 +1,7 @@
 '''
 This file containts the run algorithm for the transit search
 '''
+
 import matplotlib.pyplot as plt
 from .splash import Target
 
@@ -54,5 +55,5 @@ class PeriodicSearch(self, Target):
         '''
         Algorithm to be developed by Prajwal
         '''
-            
+
     pass
