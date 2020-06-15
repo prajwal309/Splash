@@ -14,4 +14,9 @@ class TransitFit:
     Parameters Name
     --------------
     """
+
+    def QuickFit():
+
+
+
     pass

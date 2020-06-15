@@ -4,15 +4,16 @@ This file contains the important function that is imported within the module
 
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.interpolate import LSQUnivariateSpline as spline
-from scipy.interpolate import UnivariateSpline
-from scipy.signal import savgol_filter
-from scipy.stats import binned_statistic
-import corner
 from time import time
 import os
 import glob
 import batman
+from astropy.io import fits
+
+from scipy.interpolate import LSQUnivariateSpline as spline
+from scipy.interpolate import UnivariateSpline
+from scipy.signal import savgol_filter
+from scipy.stats import binned_statistic
 
 
 def ParseFile(Location):
@@ -42,7 +43,7 @@ def ParseFile(Location):
 
 
 
-def ReadData(Location, TargetName):
+def ReadTxtData(Location, TargetName):
     '''
     This function reads the input file
 
@@ -96,6 +97,69 @@ def ReadData(Location, TargetName):
     return ParamName, AllData
 
 
+def ReadFitsData(Location, TargetName):
+    '''
+    This function reads the input file from Cambridge Pipeline
+
+    Input
+    #####################################
+    Location: Path to the folder containing the light curve.
+    TargetName: Name of the target for identifying the files.
+
+    Output
+    #####################################
+    Name of the parameters
+    Values of the parameters
+    '''
+
+
+    if len(Location) <1 or len(TargetName)<1:
+        raise NameError("No location or target available")
+
+    print
+    FileList = glob.glob(Location+"/*%s*.fits*" %TargetName)
+    NumFiles = len(FileList)
+
+    if NumFiles == 0:
+        raise NameError("No Files found")
+
+
+    AllData = []
+
+    ParamName = ["Time", "Flux", "CompLC1", "CompLC2", \
+                 "CompLC2", "CompLC3", "Airmass", "FWHM", \
+                 "RA_MOVE", "DEC_MOVE", "PSF_A", "PSF_B"]
+
+    AllData = []
+
+    for Counter,FileItem in enumerate(FileList):
+        FitsFile = fits.open(FileItem, memmap='r')
+
+        Time = FitsFile[1].data["JD-OBS"]
+
+        #Generate the array to save the data
+        CurrentData = np.zeros((len(Time), len(ParamName)))
+
+        CurrentData[:,0] = Time
+        CurrentData[:,1] = FitsFile[3].data[:,0]
+        CurrentData[:,2] = FitsFile[3].data[:,1]
+        CurrentData[:,3] = FitsFile[3].data[:,2]
+        CurrentData[:,4] = FitsFile[3].data[:,3]
+        CurrentData[:,5] = FitsFile[1].data["AIRMASS"]
+        CurrentData[:,6] = FitsFile[1].data["FWHM"]
+        CurrentData[:,7] = FitsFile[1].data["RA_MOVE"]
+        CurrentData[:,8] = FitsFile[1].data["DEC_MOVE"]
+        CurrentData[:,9] = FitsFile[1].data["PSF_A_5"]
+        CurrentData[:,10] = FitsFile[1].data["PSF_B_5"]
+
+        AllData.extend(CurrentData)
+
+    AllData = np.array(AllData)
+    ParamName = np.array(ParamName)
+
+    return ParamName, AllData
+
+
 def SigmaClip(Time, Flux, SigmaValue=3.0):
     '''
     This function performs the sigma clip
@@ -118,11 +182,43 @@ def SigmaClip(Time, Flux, SigmaValue=3.0):
     return Index
 
 
-def CreateOutputDir(FolderName=None):
+def BoxFit(Time, T0=None, TDur=None, Delta=100):
     '''
-    This function creates a unique ID and its corresponding dictionary.
-    '''
+    This function creates a box shaped transit
 
+    Parameters:
+    ============
+    Time: Array of the time
+    T0: The mid point of the transit in unit of Time
+    TDur: Transit Duration in days
+    '''
+    TransitIndex = np.abs((Time-T0))<TDur/2
+    TransitModel = np.zeros(len(Time))
+    TransitModel[TransitIndex]-=Delta
+    return TransitModel
+
+
+def CustomSVDSolver(Basis, Flux):
+    '''
+    Matlab SVD function modified for python.
+    '''
+    A = np.copy(Basis)
+    b = np.copy(Flux).T
+    N, M = np.shape(A)
+
+    U,S,V = np.linalg.svd(A, full_matrices=False)
+
+    d = S
+    S = np.diag(S)
+    S[S==0] = 1.0e10
+    W = 1./S
+
+    CalcCoef = reduce(np.matmul,[U.T, b, W, V])
+    Cov = reduce(np.matmul,[V.T,W*W,V])
+    Residual = np.sum((np.matmul(A,CalcCoef)-b)**2.0)
+    ChiSquaredReduced = Residual/(N-M)
+    Cov = ChiSquaredReduced*Cov
+    return CalcCoef, Cov, Residual
 
 
 def SplineFlattening(Time, Flux, period, NIter = 4, StdCutOff=2.5, poly=3, knot=1):
@@ -153,14 +249,27 @@ def SplineFlattening(Time, Flux, period, NIter = 4, StdCutOff=2.5, poly=3, knot=
     return FluxPred
 
 
-def CreateCornerPlot(Parameters, ParametersName, OutputDir):
-    #Generate a diagnostic corner plot
-    plt.figure(figsize=(14,14), dpi=200)
-    corner.corner(Parameters, labels=ParametersName, show_titles=True, quantiles=[0.158, 0.50, 0.842])
-    plt.tight_layout()
-    plt.tick_params(which="both", direction="in")
-    plt.savefig(OutputDir+"/CornerPlot.png")
-    plt.close('all')
+def GetID(Name, IdType=None):
+    '''
+    Method to get Speculoos ID/GAIA ID from viceversa
+    '''
+
+    #Loading the database
+    Data = np.loadtxt("database/Targets.csv", delimiter=",", skiprows=1, dtype=np.str)
+
+    SpName = Data[:,0]
+    SpName = np.array([Item.upper() for Item in SpName])
+    GaiaID = Data[:,2].astype(np.int)
+
+    if "SPECULOOS" in IdType.upper():
+        return GaiaID[SpName == Name][0]
+
+    elif "GAIA" in IdType.upper():
+        return SpName[GaiaID==int(Name)][0]
+    else:
+        return "Not Found"
+
+
 
 
 def InjectTransit(Time, Flux, FileLocation, Parameter="b"):
@@ -250,6 +359,7 @@ def InjectTransit(Time, Flux, FileLocation, Parameter="b"):
     np.savetxt(TempFileLocation,np.transpose((JD_UTC, Flux+ModelTransitFlux, Err, XShift, YShift, FWHM_X,  FWHM_Y, FWHM, SKY, AIRMASS, ExpTime)), header="JD_UTC, Flux, Err, XShift, YShift, FWHM_X,  FWHM_Y, FWHM, SKY, AIRMASS, ExpTime")
     return Time, Flux + ModelTransitFlux, TempFileLocation
 
+
 def NormalizeFlux(UTC_Time, Flux, OutputDir, FlattenMethod=0, Plot=False):
     '''
     1 Method ---> Divide by the median
@@ -311,177 +421,3 @@ def NormalizeFlux(UTC_Time, Flux, OutputDir, FlattenMethod=0, Plot=False):
     plt.savefig(SaveName)
     plt.close('all')
     return NormalizedFlux
-
-
-def GeneratePdfReport(OutputDir, InputFileLocation):
-    '''
-    This function generates the output directory
-    '''
-
-    Global_TimeList = []
-    Global_FluxList = []
-
-    Global_TimeList_Binned = []
-    Global_FluxList_Binned = []
-
-
-    JD_UTC, Flux, _, _, _, _, _, _,	_, _, _= np.loadtxt(InputFileLocation, unpack=True)
-    Diff1D = np.diff(JD_UTC)
-    Index = np.concatenate((np.array([False]), Diff1D>0.25))
-    Locations = np.where(Index)[0]
-
-    ChunkCount = 0
-    Start=0
-    for Value in range(len(Locations)+1):
-        if ChunkCount<len(Locations):
-            Stop = Locations[ChunkCount]
-        else:
-            Stop = len(Flux)
-        ChunkCount+=1
-
-        SelectedTime = JD_UTC[Start:Stop]
-        SelectedFlux = Flux[Start:Stop]
-
-        #Sigma Clip
-        OutliersIndex = SigmaClip(SelectedTime, SelectedFlux, SigmaValue=5.0)
-        SelectedTime = SelectedTime[~OutliersIndex]
-        SelectedFlux = SelectedFlux[~OutliersIndex]
-        SelectedFlux -= np.mean(SelectedFlux)
-
-        Global_TimeList.append(SelectedTime)
-        Global_FluxList.append(SelectedFlux)
-
-        NBins = int(len(SelectedTime)/16)
-        TempBinnedTime = binned_statistic(SelectedTime, SelectedTime, statistic="median", bins=NBins)[0]
-        TempBinnedFlux = binned_statistic(SelectedTime, SelectedFlux, statistic="median", bins=NBins)[0]
-
-        Global_TimeList_Binned.append(TempBinnedTime)
-        Global_FluxList_Binned.append(TempBinnedFlux)
-        Start = Stop
-
-    ModelFileList = np.array(glob.glob(OutputDir+"/PerNightAnalysisData/*.txt"))
-
-    SavePdfLocation = OutputDir+"/PerNightPdfSummary"
-    if not(os.path.exists(SavePdfLocation)):
-        os.system("mkdir %s" %(SavePdfLocation.replace(" ", "\ ")))
-
-
-    NightArray = np.array([int(Item.split("/")[-1][5:8]) for Item in ModelFileList])
-    RankArray = np.array([int(Item.split("/")[-1][-7:-4]) for Item in ModelFileList])
-    IndexOrder = np.argsort(NightArray*1000+RankArray)
-    ModelFileList = ModelFileList[IndexOrder]
-    NightArray = NightArray[IndexOrder]
-    RankArray = RankArray[IndexOrder]
-
-    NightCounter = 0
-
-    FirstNight = True
-    for FileCounter, N in enumerate(NightArray):
-
-        if N!=NightCounter:
-            NightCounter = N
-
-            #Save the file
-            if not(FirstNight):
-                print("Saving it now")
-                PdfFile.output(PdfFileName)
-                print("New Summary File Generated in %s." %SavePdfLocation)
-
-            #Number of Models
-            NumModels = np.sum(NightArray==N)
-            Height = 115+75*NumModels//2
-            Width = 150
-
-            PdfFileName = SavePdfLocation+"/"+"SummaryNight"+str(N).zfill(3)+".pdf"
-            PdfFile = FPDF('P', 'mm', (Width,Height))
-            PdfFile.add_page()
-
-            #Load the model File
-            ReducedChiSqrDataName = OutputDir+"/Data/Night"+str(N)+".csv"
-            T0_Range, TransitDepth, Signal_Strength, ReducedChiSq, LocalSTD, Uncertainty, TDur = np.loadtxt(ReducedChiSqrDataName, delimiter=",", skiprows=1, unpack=True)
-
-            #If range is present
-            RangePresent = max(Uncertainty) - min(Uncertainty)>1e-5
-
-            #Generate the first figure
-            PlotX0 = int(min(Global_TimeList[N-1]))
-
-
-            plt.figure()
-            fig, ax = plt.subplots(figsize=(5.51181*2,2.75591*2), nrows=2, ncols=1)
-            ax[0].plot(Global_TimeList[N-1] - PlotX0, Global_FluxList[N-1], "ko")
-            ax[0].set_xticks([])
-            ax[0].set_ylabel("Normalized Flux", fontsize=15)
-            ax[0].tick_params(direction="in", which="both", length=7.5, width=2.5)
-
-            if RangePresent:
-                ax[1].errorbar(T0_Range - PlotX0, TransitDepth, yerr=Uncertainty, marker="d", markersize=3, color="navy", linestyle="None", elinewidth=2, capsize=3, ecolor="navy")
-            else:
-                ax[1].plot(T0_Range - PlotX0, TransitDepth, linestyle="None", marker="*")
-
-            ax[1].set_xlabel("JD-%s" %(PlotX0), fontsize=15)
-            ax[1].set_ylabel("Transit Depth", fontsize=15, color="navy")
-            ax[1].spines["left"].set_color("orange")
-            ax[1].tick_params(direction="in", which="both", length=7.5, width=2.5,color="navy")
-
-            ax1_twin = ax[1].twinx()
-            ax1_twin.plot(T0_Range - PlotX0, ReducedChiSq, linestyle="None", marker="*", color="red")
-            ax1_twin.tick_params(direction="in", which="both", color="red")
-            ax1_twin.set_ylabel("$\\chi^2_\\nu$", fontsize=15, color="red")
-            ax1_twin.spines["right"].set_color("red")
-            ax1_twin.tick_params(direction="in", which="both", length=7.5, width=2.5)
-
-            SaveNameTemp = "Temp%s.png" %(str(N).zfill(3))
-            plt.tick_params(direction="in", which="both")
-            plt.tight_layout()
-            plt.savefig(SaveNameTemp)
-
-            PdfFile.set_font('Helvetica', 'B', 16)
-            PdfFile.cell(140, 10, 'Night -'+str(N), align="C")
-            PdfFile.image(SaveNameTemp, x=10, y=20, w=140, h=70)
-            PdfFile.line(0, 90, 170, 90)
-            PdfFile.line(0, 91, 170, 91)
-
-            ModelCount = 1
-            os.system("rm %s" %(SaveNameTemp))
-            LocalSTD = np.mean(LocalSTD)
-
-            FirstNight = False
-
-        #Save the Model
-
-        XLocation = 10 + (ModelCount%2==0)*65
-        YLocation = 100 + (ModelCount-1)//2*65
-        #print(N, ModelFileList[FileCounter])
-
-        JD_UTC, TransitModel, BackgroundContinuum = np.loadtxt(ModelFileList[FileCounter], skiprows=1, delimiter=",", unpack=True)
-        Model = TransitModel+BackgroundContinuum
-        Model -= np.mean(Model)
-        ModelSaveName = "Temp%s_%s.png" %(str(N).zfill(3), str(ModelCount).zfill(3))
-
-        ReadTitleOnly = open(ModelFileList[FileCounter],'r').readline()
-        TMidPoint = float(ReadTitleOnly.split("@")[-1])
-
-        plt.figure(figsize=(6.5,6))
-        plt.plot(Global_TimeList[N-1] - PlotX0, Global_FluxList[N-1], "ko", markersize=2)
-        plt.plot(JD_UTC - PlotX0, TransitModel, color="navy", lw=3.5)
-        plt.plot(JD_UTC - PlotX0, Model, "r-", lw=2)
-        plt.errorbar(Global_TimeList_Binned[N-1]- PlotX0, Global_FluxList_Binned[N-1], linestyle="None", yerr=np.ones(len(Global_TimeList_Binned[N-1]))*LocalSTD/4.0, capsize=3, ecolor="green", marker="d", markersize=3, color="green")
-        plt.axvline(x=TMidPoint-PlotX0, color="navy", linestyle=":", lw=2.5)
-        TitleTextModel = "Promise Factor:"+str(RankArray[FileCounter])
-        plt.tick_params(direction="in", which="both", length=7.5, width=2.5)
-        plt.title(TitleTextModel)
-        plt.tight_layout()
-        plt.savefig(ModelSaveName)
-        plt.close('all')
-
-        #Add figure to the file
-        PdfFile.image(ModelSaveName, x=XLocation, y=YLocation, w=65, h=60)
-
-
-        #plt.plot(CurrentFile[])
-        os.system("rm %s" %ModelSaveName)
-        ModelCount+=1
-
-    #For the last night that still needs to be saved
-    PdfFile.output(PdfFileName)

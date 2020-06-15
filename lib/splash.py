@@ -4,9 +4,13 @@ the data from the Cambridge Pipeline.
 '''
 
 import numpy as np
-from .Functions import ReadData, ParseFile
 from time import time
 import os
+from astropy.io import fits
+import re
+
+from .Functions import ReadTxtData, ReadFitsData,\
+     ParseFile, GetID
 
 
 class Target:
@@ -24,12 +28,29 @@ class Target:
         '''
 
         if len(Location)>0 and len(Name)>0:
-            self.ParamNames, self.ParamValues = ReadData(Location, Name)
+            #self.ParamNames, self.ParamValues = ReadOldData(Location, Name)
+            self.ParamNames, self.ParamValues = ReadFitsData(Location, Name)
 
         #Generate the output folder
         self.ID, self.OutputPath = self.MakeOutputDir(FolderName=Output)
         self.DailyData = self.NightByNight()
-        self.NumberNights = len(self.DailyData)
+        self.NumberOfNights = len(self.DailyData)
+
+        #Flag to produce light curves once the data been processed
+        self.Processed = False
+
+        #Find the id from the database
+        if "Sp" in Name:
+            self.SpeculoosID = Name
+            self.GaiaID  = GetID(Name, IdType="SPECULOOS")
+        elif re.search("[0-9]{17}",Name):
+            #GAIA ID is at least 17 digit long
+            self.GaiaID = Name
+            self.SpeculoosID = GetID(Name, IdType="GAIA")
+        else:
+            self.SpeculoosID="Not Found"
+            self.GaiaID = "Not Found"
+
 
     def NightByNight(self):
         '''
@@ -53,7 +74,8 @@ class Target:
 
     def MakeOutputDir(self, FolderName=""):
         '''
-        Check if the output directory exists
+        Check if the output directory exists, and
+        make the directory if they do not exist
         '''
 
         if FolderName:
@@ -117,4 +139,20 @@ class Target:
         NightNumber is the night with the first case being 2.
         '''
         input("Inside get Time Flux  by night")
+        pass
+
+
+    def MakePlots(self):
+        '''
+        This method will make plots for the figures.
+        '''
+
+        if not(self.Processed):
+            print("The data have not be processed yet.")
+
+        for i in range(self.NumberNights):
+            plt.figure()
+            plt.plot(self.Time[i], self,Flux[i], "ko")
+            plt.show()
+
         pass

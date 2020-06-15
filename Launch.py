@@ -3,8 +3,8 @@
 #import the libraries
 import numpy as np
 
-from lib.LightCurve import Target
-from lib.algorithm import TransitSearch
+from lib.splash import Target
+from lib.algorithm import LinearSearch
 
 import argparse
 import time
@@ -30,10 +30,9 @@ parser.add_argument('-o', nargs=1, help="location of the output folder")
 
 args = parser.parse_args()
 
-
+#Assign default value if the
 Path = "data" if not(args.i) else args.i[0]
 OutputDir = "" if not(args.o) else args.o[0]
-
 
 #Initiate the target
 if args.n:
@@ -41,10 +40,11 @@ if args.n:
 else:
     raise NameError("The name of the target to be run is not provided.")
 
-plt.figure()
-plt.plot(CurrentTarget.DailyData[0][:,0], CurrentTarget.DailyData[0][:,1], "ko")
-plt.show()
 
-TransitModel = TransitSearch()
-TransitModel.LinearSearch(CurrentTarget)
-TransitModel.PeriodicSearch(CurrentTarget)
+print(CurrentTarget.GaiaID)
+print(CurrentTarget.SpeculoosID)
+print(CurrentTarget.Processed)
+print(CurrentTarget.NumberOfNights)
+
+
+GTS = LinearSearch(CurrentTarget)
