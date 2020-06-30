@@ -16,7 +16,8 @@ from .Functions import ReadTxtData, ReadFitsData,\
 
 #formatting for the image
 import matplotlib as mpl
-mpl.rc('font',**{'sans-serif':['Helvetica'], 'size':15,'weight':'bold'})
+#mpl.rc('font',**{'sans-serif':['Helvetica'], 'size':15,'weight':'bold'})
+mpl.rc('font',**{'serif':['Helvetica'], 'size':15})
 mpl.rc('axes',**{'labelweight':'bold', 'linewidth':1.5})
 mpl.rc('ytick',**{'major.pad':22, 'color':'k'})
 mpl.rc('xtick',**{'major.pad':10,})
@@ -49,6 +50,11 @@ class Target:
             else:
                 input("Only three version are available")
 
+        #TBJD offset change
+        if min(self.ParamValues[:,0])>2450000.0:
+            self.ParamValues[:,0]-=2450000.0
+        self.ParamValues[:,1]/=np.nanmedian(self.ParamValues[:,1])
+
         self.AllTime = self.ParamValues[:,0]
         self.AllFlux = self.ParamValues[:,1]
 
@@ -71,6 +77,11 @@ class Target:
         self.DailyData = self.NightByNight()
         self.NumberOfNights = len(self.DailyData)
 
+        self.Daily_T0_Values = []
+        for counter in range(self.NumberOfNights):
+            self.Daily_T0_Values.append(int(min(self.DailyData[counter][:,0])))
+
+        self.Daily_T0_Values = np.array(self.Daily_T0_Values)
         #Flag to produce light curves once the data been processed
         self.Processed = False
         self.QualityFactor = np.ones(len(self.ParamValues[:,0])).astype(np.bool)
@@ -99,7 +110,7 @@ class Target:
                 Stop = BreakLocations[ChunkCount]
             else:
                 Stop = len(Time)+1
-            SlicedData.append(self.ParamValues[Start:Stop])
+            SlicedData.append(np.array(self.ParamValues[Start:Stop]))
             self.NightLocations.append([Start, Stop])
             Start = Stop
         return SlicedData
@@ -217,7 +228,7 @@ class Target:
                     self.OutlierLocation = os.path.join(self.ResultDir, "Outliers")
                     if not(os.path.exists(self.OutlierLocation)):
                         os.system("mkdir %s" %self.OutlierLocation)
-                    SaveName = os.path.join(self.OutlierLocation, str(NightNumber).zfill(9)+".png")
+                    SaveName = os.path.join(self.OutlierLocation, "Night"+str(NightNumber+1).zfill(4)+".png")
                     plt.savefig(SaveName)
                 if ShowPlot:
                     plt.show()
@@ -234,7 +245,7 @@ class Target:
             self.QualityFactorFromNight.append(self.QualityFactor[Start:Stop])
 
 
-    def PhaseCoverage(self, StepSize=0.05, PLow=0.30, PUp=250.0, NTransits=2, Tolerance=0.005):
+    def PhaseCoverage(self, StepSize=0.05, PLow=0.30, PUp=25.0, NTransits=2, Tolerance=0.005):
         '''
         This function calculates the phase coverage of the data
 

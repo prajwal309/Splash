@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from time import time
 import os
 import glob
-import batman
+
 from astropy.io import fits
 from functools import reduce
 from scipy.interpolate import LSQUnivariateSpline as spline
@@ -37,15 +37,19 @@ def FindLocalMaxima(Data, NData=4):
     returns an array of index for the night
 
     '''
+
     Index = np.zeros(len(Data)).astype(np.bool)
     for counter in range(len(Data)):
         Data[counter-NData:counter+NData]
         StartIndex = counter-NData
         if StartIndex<0:
             StartIndex = 0
-        StopIndex = counter+NData
-        Index[counter] = Data[counter]>0.99*max(Data[StartIndex:StopIndex])
+        StopIndex = counter+NData+1
+        if StopIndex>len(Data):
+            StopIndex=len(Data)
+        Index[counter] = Data[counter]>0.999999*max(Data[StartIndex:StopIndex])
     return Index
+
 
 
 def RunningResidual(Time, Flux, NumBins):
@@ -65,13 +69,16 @@ def RunningResidual(Time, Flux, NumBins):
 
     Returns
     -------------
-    This array of
+    arrays
+    Value of standard deviation
     '''
-    NumPoints = int(len(Time)/NumBins)
 
+    NumPoints = int(len(Time)/NumBins)
     CurrentSTD = []
     for i in range(NumBins):
-        CurrentSTD.append(np.std(Flux[i*NumPoints:i*(NumPoints+1)])/(np.sqrt(NumPoints)))
+        Start = i*NumPoints
+        Stop = (i+1)*NumPoints
+        CurrentSTD.append(np.std(Flux[Start:Stop])/(np.sqrt(NumPoints)))
     CurrentSTD = np.array(CurrentSTD)
     return CurrentSTD
 
@@ -443,169 +450,3 @@ def GetID(Name, IdType=None):
         return SpName[GaiaID==int(Name)][0]
     else:
         return "Not Found"
-
-
-def InjectTransit(Time, Flux, FileLocation, Parameter="b"):
-    '''
-    Injects the transits
-
-    Parameters
-    ============
-    Flux
-
-    Rp_Rs
-
-    T0
-
-
-    Specify the
-
-    '''
-    #Read the parameters from the file
-
-    #remove the signal from the data
-    os.system("rm data/*temp*")
-    if "b" in Parameter:
-        print("Injecting TRAPPIST-1b transits")
-        InjectParams = open("InjectData/TRAPPIST_1b.ini").readlines()
-    elif "c" in Parameter:
-        print("Injecting TRAPPIST-1c transits")
-        InjectParams = open("InjectData/TRAPPIST_1c.ini").readlines()
-    elif "d" in Parameter:
-        print("Injecting TRAPPIST-1d transits")
-        InjectParams = open("InjectData/TRAPPIST_1d.ini").readlines()
-
-    Period = float(InjectParams[0].split("#")[0].split(":")[1])
-    T0 = float(InjectParams[1].split("#")[0].split(":")[1])
-    Rp_Rs = float(InjectParams[2].split("#")[0].split(":")[1])
-    a_Rs = float(InjectParams[3].split("#")[0].split(":")[1])
-    b = float(InjectParams[4].split("#")[0].split(":")[1])
-    u = float(InjectParams[5].split("#")[0].split(":")[1])
-
-    Inc = np.rad2deg(np.arccos(b/a_Rs))
-
-    # Evaluate a batman model
-    paramsBatman = batman.TransitParams()
-    paramsBatman.t0 = T0                        #time of conjunction. This offset is taken care when Phase is changed.
-    paramsBatman.per = Period                   #orbital period
-    paramsBatman.rp = Rp_Rs                     #planet radius (in units of stellar radii)
-    paramsBatman.a = a_Rs                       #semi-major axis (in units of stellar radii)
-    paramsBatman.inc = Inc                      #orbital inclination (in degrees)
-    paramsBatman.ecc = 0                        #eccentricity
-    paramsBatman.w = 90.0                       #longitude of periastron (in degrees)
-    paramsBatman.limb_dark = "linear"           #limb darkening model
-    paramsBatman.u = [u]                        #limb darkening parameters
-
-    #Add the transit to all data
-    mTransit = batman.TransitModel(paramsBatman, Time, supersample_factor = 15, exp_time = 30.0/(86400.0))#initializes model
-    ModelTransitFlux =  (mTransit.light_curve(paramsBatman)-1.0)
-
-    #Save the data night by night
-    Diff1D = np.diff(Time)
-    Index = np.concatenate((np.array([False]), Diff1D>0.25))
-    Locations = np.where(Index)[0]
-    Start = 0
-
-    if not(os.path.exists("InjectedSignalsFigure")):
-        os.system("mkdir InjectedSignalsFigure")
-    os.system("rm InjectedSignalsFigure/*")
-    for i in range(len(Locations)+1):
-        Night = i+1
-        if i<len(Locations):
-            Stop = Locations[i]
-        else:
-            Stop = len(Flux)
-        TimeChunk = Time[Start:Stop]
-        FluxChunk = Flux[Start:Stop]
-        #Generate the transit light curve now
-        mTransit = batman.TransitModel(paramsBatman, TimeChunk, supersample_factor = 15, exp_time = 30.0/(86400.0))#initializes model
-        ModelTransitFluxChunk =  (mTransit.light_curve(paramsBatman)-1.0)
-
-        #Plot only if transit is present:
-
-        if min(ModelTransitFluxChunk)<-1e-5:
-            print("Saving Figure Corresponding to Injected Data for Night-", Night)
-
-            T0Plot = int(min(TimeChunk))
-
-            plt.figure(figsize=(20,5))
-            plt.plot(TimeChunk - T0Plot, FluxChunk+ModelTransitFluxChunk - np.mean(FluxChunk), "ko", label="Data+Signal")
-            plt.plot(TimeChunk - T0Plot, ModelTransitFluxChunk, "ro-", lw=2, label="Injected Signal")
-            plt.xlabel("UTC Time")
-            plt.ylabel("Normalized Flux")
-            plt.legend()
-            plt.title(str(T0Plot))
-            plt.tight_layout()
-            plt.savefig("InjectedSignalsFigure/InjectedSignal_Night"+str(Night).zfill(3)+".png")
-            plt.close('all')
-        Start=Stop
-
-    #Create another temporary file
-    JD_UTC, Flux, Err, XShift, YShift, FWHM_X,  FWHM_Y, FWHM, SKY, AIRMASS, ExpTime = np.loadtxt(FileLocation, unpack=True)
-
-    TempFileLocation = FileLocation.replace(".txt", "temp.txt")
-    np.savetxt(TempFileLocation,np.transpose((JD_UTC, Flux+ModelTransitFlux, Err, XShift, YShift, FWHM_X,  FWHM_Y, FWHM, SKY, AIRMASS, ExpTime)), header="JD_UTC, Flux, Err, XShift, YShift, FWHM_X,  FWHM_Y, FWHM, SKY, AIRMASS, ExpTime")
-    return Time, Flux + ModelTransitFlux, TempFileLocation
-
-
-def NormalizeFlux(UTC_Time, Flux, OutputDir, FlattenMethod=0, Plot=False):
-    '''
-    1 Method ---> Divide by the median
-    2 Method ---> Divide by mean
-    3 Method ---> Spline flattening
-    4 Method ---> Savitsky Golay Flattening
-    '''
-    #Find the segments in the data
-    UTC_Time = np.array(UTC_Time)
-    Flux = np.array(Flux)
-    NormalizedFlux = np.zeros(len(Flux))-1.0
-
-    Diff1D = np.diff(UTC_Time)
-    Index = np.concatenate((np.array([False]), Diff1D>0.25))
-    Locations = np.where(Index)[0]
-
-    FigSaveLocation = OutputDir+"/global_LC.png"
-
-    T0 = int(min(UTC_Time))
-
-    plt.figure(figsize=(14,6))
-    Start = 0
-    for i in range(len(Locations)+1):
-        if i<len(Locations):
-            Stop = Locations[i]
-        else:
-            Stop = len(Flux)
-        TimeChunk = UTC_Time[Start:Stop]
-        FluxChunk = Flux[Start:Stop]
-
-
-        if FlattenMethod==1:
-            #Normalize them using bilinear method
-            ModelFlux = np.ones(len(FluxChunk))*np.mean(FluxChunk)
-        elif FlattenMethod==2:
-            #Normalize them using bilinear method
-            ModelFlux = np.ones(len(FluxChunk))*np.mean(FluxChunk)
-        elif FlattenMethod==3:
-            ModelFlux = SplineFlattening(TimeChunk, FluxChunk, 0.25) #Fit a spline of order 3 with knots every 0.1 day interval
-        elif FlattenMethod==4:
-            ModelFlux = savgol_filter(FluxChunk, 51, 1)
-        else:
-            print("*******************************************************")
-            print("*Currently only following methods are available       *")
-            print("*Method 1: Median Filtering                           *")
-            print("*Method 2: Mean Filtering                             *")
-            print("*Method 3: Spline Flattening                          *")
-            print("*Method 4: Savitsky Golay Flattening                  *")
-            print("*******************************************************")
-            raise("Correct Method ")
-        NormalizedFlux[Start:Stop] = FluxChunk/ModelFlux
-        plt.plot(TimeChunk -T0, FluxChunk, marker="o", linestyle="None")
-        plt.plot(TimeChunk - T0, ModelFlux, "k-", lw=2)
-        Start=Stop
-    plt.xlabel("JD Time -- "+str(T0), fontsize=20)
-    plt.ylabel("Normalized Flux", fontsize=20)
-    plt.tight_layout()
-    SaveName = OutputDir+"/global_LC.png"
-    plt.savefig(SaveName)
-    plt.close('all')
-    return NormalizedFlux
