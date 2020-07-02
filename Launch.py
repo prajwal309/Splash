@@ -58,10 +58,10 @@ SVDSearch.Run(CurrentTarget, SavePlot=True)
 #SVDSearch.PeriodicSearch(CurrentTarget, method="TLSLikelihood", \
 #ShowPlot=False, SavePlot=True)
 
-#SVDSearch.PeriodicSearch(CurrentTarget, method="TLS", \
-#ShowPlot=False, SavePlot=True)
+SVDSearch.PeriodicSearch(CurrentTarget, method="TLS", \
+ShowPlot=False, SavePlot=True)
 
 SVDSearch.PeriodicSearch(CurrentTarget, method="TransitPair", \
 ShowPlot=False, SavePlot=True)
 
-TransitFit(CurrentTarget, SVDSearch, TDur=2.0)
+TransitFit(CurrentTarget, SVDSearch, NRuns=10000, NumFits=5, TDur=2.5, Tolerance=0.035)

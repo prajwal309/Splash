@@ -19,12 +19,41 @@ from scipy.interpolate import UnivariateSpline
 from scipy.ndimage import filters
 
 
+
+def fold_data(Time , Flux, Period):
+  '''
+  Function to fold the time, and flux for a given period
+
+  Parameters
+  -------------
+  Time: numpy array
+        Time series as a numpy array
+
+  Flux: numpy array
+        Flux series as a numpy array
+
+  Period: float
+        The value of period to which data is folded
+
+  Returns
+  ----------
+  array, array
+        Arranged index of
+  '''
+
+  FoldedTime = Time%Period
+  ArrangeIndex = np.array(FoldedTime).argsort()
+  ArrangedTime = FoldedTime[ArrangeIndex]
+  ArrangedFlux = Flux[ArrangeIndex]
+  return ArrangedTime, ArrangedFlux
+
+
 def FindLocalMaxima(Data, NData=4):
     '''
     This function finds the value of the local maxima
 
     Input Parameter:
-    ------------------
+    ----------------
 
     Data: numpy array
           Data where the local maxima is to be found.
@@ -33,8 +62,9 @@ def FindLocalMaxima(Data, NData=4):
           Number of neighboring data points to be considered.
 
     Returns
-    ------------------
-    returns an array of index for the night
+    -------
+    array
+        an array of index for the night
 
     '''
 
@@ -57,7 +87,8 @@ def RunningResidual(Time, Flux, NumBins):
     Function yields the moving average of the data
 
     Parameters
-    ------------
+    ----------
+
     Time: array of float
             array for which the moving average is to be determined
 

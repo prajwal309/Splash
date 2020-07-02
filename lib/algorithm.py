@@ -94,6 +94,8 @@ class GeneralTransitSearch:
         self.AllTransitDepthUnctyMatrix = []
         self.AllResidualMatrix = []
         self.AllCombinationBasis = []
+        self.AllSTD = []
+        self.AllCoeffValues = []
 
         self.AllModeledT0 = []
         self.AllDetrendedFlux = []
@@ -110,6 +112,8 @@ class GeneralTransitSearch:
                     self.AllTransitDepthMatrix.append(np.array([]))
                     self.AllTransitDepthUnctyMatrix.append(np.array([]))
                     self.AllResidualMatrix.append(np.array([]))
+                    self.AllCoeffValues.append([])
+                    self.AllSTD.append(np.std(Target))
 
             elif RunStatus==1:
                 self.AllCombinationBasis.append(self.BestBasisColumns)
@@ -417,6 +421,7 @@ class GeneralTransitSearch:
                 Metric = (Coeff[-2]/Uncertainty[-2])/(Residual*Residual)
 
                 if self.BestMetric<Metric:
+                    self.BestCoeff = Coeff
                     self.BestMetric = Metric
                     self.BestBasisColumns = np.array(Combination)
                     self.BestModel = Model
@@ -440,7 +445,11 @@ class GeneralTransitSearch:
         self.CurrentTransitDepthMatrix[InfLocation] = 1e-8
         self.CurrentUnctyTransitMatrix[InfLocation] = 1e-7
         self.CurrentMetricMatrix[InfLocation] = np.min(self.CurrentMetricMatrix)
+
+
         self.CurrentMetricMatrix*=self.CurrentSTD*self.CurrentSTD
+        self.AllSTD.append(self.CurrentSTD)
+        self.AllCoeffValues.append(self.BestCoeff)
         return 1
 
 
@@ -470,6 +479,9 @@ class GeneralTransitSearch:
         Yields
         ---------------
         '''
+
+        #The minimum period for which to look the planet
+        self.MinPeriod = MinPeriod
 
         self.UnravelMetric = []
         Row, Col = np.shape(self.AllMetricMatrix[0])
@@ -543,6 +555,7 @@ class GeneralTransitSearch:
 
            self.T0s = []
            self.TP_Periods = []
+           self.TransitDepth = []
            self.SDE = []
 
 
@@ -595,7 +608,12 @@ class GeneralTransitSearch:
                    #print("The calculated value is::", CalcValue)
                    self.T0s.append(min([T1,T2]))
                    self.TP_Periods.append(HarmonicPeriod)
+
+                   BestLocation = CalcValue == np.max(CalcValue)
+                   BestTransitDepth = WeightedMean[BestLocation]
+
                    self.SDE.append(np.max(CalcValue))
+                   self.TransitDepth.append(BestTransitDepth)
                    HarmonicPeriod=CurrentPeriod/HarmonicNum
                    HarmonicNum+=1.0
 
@@ -630,7 +648,6 @@ class GeneralTransitSearch:
                else:
                    ax1.axvline(x=i*BestPeriod, color="cyan", linestyle=":", lw=3, alpha=0.8)
            ax1.plot(self.TP_Periods, self.SDE, "r-", lw=2)
-           ax1.legend()
            ax2.plot(Target.PhasePeriod, Target.PhaseCoverage, color="green", alpha=0.8, lw=2.0, label="Phase Coverage")
            ax1.set_xlabel("Period (Days)", fontsize=20)
            ax2.set_ylabel("Phase Coverage (\%)", color="green", labelpad=3.0,fontsize=20, rotation=-90)
