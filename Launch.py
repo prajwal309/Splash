@@ -7,6 +7,7 @@ from lib.splash import Target
 from lib.algorithm import GeneralTransitSearch
 from lib.sampler import TransitFit
 
+
 import argparse
 import time
 import os
@@ -47,9 +48,13 @@ if args.n:
 else:
     raise NameError("The name of the target to be run is not provided.")
 
+print("\n\n")
+print("Now running :", CurrentTarget.Name)
 
 CurrentTarget.PreClean(CutOff=5, NIter=2, Columns=-1, \
               MinDataCount=75, SavePlot=True)
+
+CurrentTarget.PreWhitening(SavePlot=True, ShowPlot=False)
 
 SVDSearch = GeneralTransitSearch()
 SVDSearch.Run(CurrentTarget, SavePlot=True)
@@ -61,7 +66,12 @@ SVDSearch.Run(CurrentTarget, SavePlot=True)
 SVDSearch.PeriodicSearch(CurrentTarget, method="TLS", \
 ShowPlot=False, SavePlot=True)
 
-SVDSearch.PeriodicSearch(CurrentTarget, method="TransitPair", \
+SVDSearch.PeriodicSearch(CurrentTarget, method="TransitMatch", \
 ShowPlot=False, SavePlot=True)
 
-TransitFit(CurrentTarget, SVDSearch, NRuns=10000, NumFits=5, TDur=2.5, Tolerance=0.035)
+
+TransitFit(CurrentTarget, SVDSearch, NRuns=10000, NumFits=5, \
+           TDur=1.5, Tolerance=0.035)
+
+#TransitFit(CurrentTarget, SVDSearch, NRuns=1500, NumFits=CurrentTarget.NumberOfNights, \
+#           TDur=2.5, Tolerance=0.035)

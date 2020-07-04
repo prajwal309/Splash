@@ -77,7 +77,7 @@ class GeneralTransitSearch:
         self.TDurValues = np.arange(self.TDurLower, self.TDurHigher+self.TDurStepSize, self.TDurStepSize)
         self.BasisItems = self.transitSearchParam['Params'].split(",")
         self.TLS_Status = False
-        self.TransitPair_Status = False
+        self.TransitMatch_Status = False
 
         NCPUs = int(self.transitSearchParam["NCPUs"])
 
@@ -151,7 +151,7 @@ class GeneralTransitSearch:
                     BestTDur = self.TDurValues[BestPixelCol][0]
 
                     #Bin the data
-                    NumBins = int((max(self.CurrentTime) - min(self.CurrentTime))*24.0*60.0/5.0)
+                    NumBins = int((max(self.CurrentTime) - min(self.CurrentTime))*24.0*60.0/10.0)
                     NData  = len(self.CurrentTime)/NumBins
                     self.CurrentResidual = self.CurrentFlux - self.BestModel
                     self.BinnedTime = binned_statistic(self.CurrentTime, self.CurrentTime, bins=NumBins)[0]
@@ -195,7 +195,7 @@ class GeneralTransitSearch:
                     ax0.axvline(BestT0 - T0_Int, color="red")
                     ax0.set_xlim(min(self.T0_Values- T0_Int-T0Offset/2), max(self.T0_Values- T0_Int)+T0Offset/2)
 
-                    YLower, YUpper = np.percentile(self.CurrentFlux, [1.0, 99.0])
+                    YLower, YUpper = np.percentile(self.CurrentFlux, [2.0, 98.0])
                     ax0.set_ylim([YLower, YUpper])
                     ax0.set_xticklabels([])
                     ax0.set_ylabel("Normalized Flux", fontsize=20)
@@ -206,15 +206,14 @@ class GeneralTransitSearch:
 
                     ax1.axvline(x=BestT0,color="red", lw=2.0, linestyle="-")
 
-
                     for Location in PeakLocations:
-                        ax1.plot(self.T0_Values[Location], MaxLikelihoodValues[Location], color="green", \
-                        marker="d", markersize=10)
+                        ax1.plot(self.T0_Values[Location], MaxLikelihoodValues[Location], color="red", \
+                        marker="d", markersize=10, zorder=20)
                         #ax1.axvline(x=self.T0_Values[Location],color="blue", lw=2.5, linestyle=":")
 
                     ax1.plot(self.T0_Values, MaxLikelihoodValues, color="black", marker="2", markersize=15, \
                     linestyle=":", lw=0.5)
-                    ax1.set_ylim([min([0.6*min(MaxLikelihoodValues),1.4*min(MaxLikelihoodValues)]),1.4*max(MaxLikelihoodValues)])
+                    ax1.set_ylim([min([0.6*min(MaxLikelihoodValues), 1.4*min(MaxLikelihoodValues)]), 1.4*max(MaxLikelihoodValues)])
                     ax1.set_yticks([])
                     ax1.set_ylabel("Likelihood", fontsize=15)
                     ax1.set_xticks([])
@@ -256,7 +255,7 @@ class GeneralTransitSearch:
 
         #Save the file
         np.savetxt(os.path.join(self.DataDir,"DetrendedFlux.csv"), \
-            np.transpose((Target.AllTime[Target.QualityFactor], self.AllDetrendedFlux)), \
+            np.transpose((Target.AllTime, self.AllDetrendedFlux)), \
             delimiter="," , header="Time, Detrended Flux")
 
 
@@ -291,8 +290,6 @@ class GeneralTransitSearch:
 
         ColumnArray = np.array(ColumnValues)
         self.ColumnArray = np.array(ColumnValues)
-
-        #self.BasisCombination = list(itertools.combinations(self.ColumnArray,int(self.transitSearchParam["Combination"])))
 
         self.BasisCombination = []
         for i in range(1,int(self.transitSearchParam["Combination"])+1):
@@ -365,10 +362,8 @@ class GeneralTransitSearch:
 
         '''
 
-        #Target
-        QualityIndex = Target.QualityFactorFromNight[NightNum]
-        self.CurrentData = Target.DailyData[NightNum][QualityIndex]
 
+        self.CurrentData = Target.DailyData[NightNum]
         self.CurrentTime = self.CurrentData[:,0]
         self.CurrentFlux = self.CurrentData[:,1]
 
@@ -376,8 +371,18 @@ class GeneralTransitSearch:
         if len(self.CurrentTime)<20:
             return 0
 
+        Offset = 5./(60.0*24.0)
+        self.T0_Values = np.arange(self.CurrentTime[0]+Offset,self.CurrentTime[-1]-Offset, self.TStepSize)
 
-        self.T0_Values = np.arange(self.CurrentTime[0],self.CurrentTime[-1], self.TStepSize)
+        NewT0Values = []
+        #Remove the data which have more than 5 minutes
+        for Value in self.T0_Values:
+            MinDifference = np.min(np.abs(self.CurrentTime-Value))
+
+            if MinDifference<Offset:
+                NewT0Values.append(Value)
+
+        self.T0_Values = np.array(NewT0Values)
         self.CurrentMetricMatrix = np.ones((len(self.T0_Values), len(self.TDurValues)))*-np.inf
         self.CurrentResidualMatrix = np.ones((len(self.T0_Values), len(self.TDurValues)))*-np.inf
         self.CurrentTransitDepthMatrix = np.ones((len(self.T0_Values), len(self.TDurValues)))*-np.inf
@@ -437,15 +442,14 @@ class GeneralTransitSearch:
 
         #Replace the missed value with minima
         #InfLocation = np.where(~np.isfinite(self.CurrentMetricMatrix))
-        InfLocation = np.where(np.logical_or(~np.isfinite(self.CurrentMetricMatrix),np.abs(self.CurrentTransitDepthMatrix)>1.0))
+        InfLocation = np.where(np.logical_or(~np.isfinite(self.CurrentMetricMatrix),np.abs(self.CurrentTransitDepthMatrix)>0.3))
 
         MedianResidual = np.median(self.CurrentResidualMatrix)
         #STD = np.std(self.BestDetrendedModel)
         self.CurrentResidualMatrix[InfLocation] = np.max(self.CurrentResidualMatrix)
         self.CurrentTransitDepthMatrix[InfLocation] = 1e-8
-        self.CurrentUnctyTransitMatrix[InfLocation] = 1e-7
-        self.CurrentMetricMatrix[InfLocation] = np.min(self.CurrentMetricMatrix)
-
+        self.CurrentUnctyTransitMatrix[InfLocation] = 1.0
+        self.CurrentMetricMatrix[InfLocation] = 0.0
 
         self.CurrentMetricMatrix*=self.CurrentSTD*self.CurrentSTD
         self.AllSTD.append(self.CurrentSTD)
@@ -467,7 +471,7 @@ class GeneralTransitSearch:
                 Minimum period to search for transit
 
         method: string
-                either "TransitPair" or "TLS" is expected.
+                either "TransitMatch" or "TLS" is expected. Transit pair algorithm run
 
         ShowPlot: bool
                 Shows the plot if True
@@ -505,12 +509,8 @@ class GeneralTransitSearch:
 
 
         #Determine the phase coverage
-        if method == "TLSLikelihood":
-            print("Now running TLS on the likelihood")
-            self.TLSLikelihood(Target, MinPeriod, ShowPlot, SavePlot)
-
-        elif method == "TransitPair":
-            self.TransitPairing(Target, MinPeriod, ShowPlot, SavePlot)
+        if method == "TransitMatch":
+            self.TransitMatch(Target, MinPeriod, ShowPlot, SavePlot)
 
         elif method == "TLS":
             print("Now running TLS")
@@ -521,7 +521,7 @@ class GeneralTransitSearch:
 
 
 
-    def TransitPairing(self, Target, MinPeriod, ShowPlot, SavePlot):
+    def TransitMatch(self, Target, MinPeriod, ShowPlot, SavePlot):
            '''
            Method to look at periodicity in the likelihood function
 
@@ -541,8 +541,10 @@ class GeneralTransitSearch:
                     Saves the plot if True under DiagnosticPlots subfolder
 
 
-           Return:
-           Returns T0, Period, and Likelihood
+           Return
+           -------
+           float, float, float
+                    Return value of T0, Period, and Likelihood
            '''
 
 
@@ -632,8 +634,7 @@ class GeneralTransitSearch:
            self.SDE = self.SDE[ArrangeIndex]
            self.T0s = self.T0s[ArrangeIndex]
 
-
-           SaveName = os.path.join(self.DataDir, "TransitPairingPeriodogram.csv")
+           SaveName = os.path.join(self.DataDir, "TransitMatchingPeriodogram.csv")
 
            np.savetxt(SaveName, np.transpose((self.T0s, self.TP_Periods, self.SDE)),\
            delimiter=",",header="Period,SDE")
@@ -650,7 +651,7 @@ class GeneralTransitSearch:
            ax1.plot(self.TP_Periods, self.SDE, "r-", lw=2)
            ax2.plot(Target.PhasePeriod, Target.PhaseCoverage, color="green", alpha=0.8, lw=2.0, label="Phase Coverage")
            ax1.set_xlabel("Period (Days)", fontsize=20)
-           ax2.set_ylabel("Phase Coverage (\%)", color="green", labelpad=3.0,fontsize=20, rotation=-90)
+           ax2.set_ylabel("Phase Coverage (%)", color="green", labelpad=8.0,fontsize=20, rotation=-90)
 
            ax1.set_ylabel("Signal Detection Efficiency", color="red", fontsize=20)
            MinXLim = min([min(self.TP_Periods), min(Target.PhasePeriod)])
@@ -667,16 +668,16 @@ class GeneralTransitSearch:
            plt.tight_layout()
 
            if SavePlot:
-               self.SavePath = os.path.join(Target.ResultDir, "DiagnosticPlots")
+               self.SavePath = os.path.join(Target.ResultDir, "Periodogram")
                if not(os.path.exists(self.SavePath)):
                    os.system("mkdir %s" %self.SavePath)
                if SavePlot:
-                   plt.savefig(os.path.join(self.SavePath,"TransitPairing.png"))
+                   plt.savefig(os.path.join(self.SavePath,"TransitMatching.png"))
                if ShowPlot:
                    plt.show()
 
            plt.close('all')
-           self.TransitPair_Status = True
+           self.TransitMatch_Status = True
 
 
 
@@ -705,12 +706,12 @@ class GeneralTransitSearch:
             print("Either SavePlot or SavePlot should be True. Toggling on SavePlot.")
             SavePlot = True
 
-        model = transitleastsquares(Target.AllTime[Target.QualityFactor], self.AllDetrendedFlux+1.0)
+        model = transitleastsquares(Target.AllTime, self.AllDetrendedFlux+1.0)
 
         results = model.power(
         period_min=MinPeriod,
         period_max=(Target.AllTime[-1]-Target.AllTime[0]),
-        oversampling_factor=5,
+        oversampling_factor=15,
         duration_grid_step=1.02,
         n_transits_min=1,
         Mstar=0.15,
@@ -723,7 +724,7 @@ class GeneralTransitSearch:
         for n in range(2, 5):
             ax[0].axvline(n*results.period, alpha=0.4, lw=1)
             ax[0].axvline(results.period / n, alpha=0.4, lw=1,)
-        ax[0].text(max(results.periods)*0.70,max(results.power)*0.95,\
+        ax[0].text(min([25,max(results.periods)*0.80]), max(results.power)*0.95,\
              "Period:"+str(round(results.period,4)))
         ax[0].set_xlabel('Period (days)', fontsize=20)
         ax[0].plot(results.periods, results.power, color='red', lw=2.0)
@@ -731,7 +732,7 @@ class GeneralTransitSearch:
         ax2.plot(Target.PhasePeriod, Target.PhaseCoverage, color="green", lw=2)
 
         ax[0].set_ylabel(r"SDE", color="red", fontsize=20)
-        ax2.set_ylabel(r"Phase Coverage", color="green", labelpad=3.0,fontsize=20, rotation=-90)
+        ax2.set_ylabel(r"Phase Coverage", color="green", labelpad=7.0,fontsize=20, rotation=-90)
 
         ax[0].spines['left'].set_color('red')
         ax[0].spines['right'].set_color('green')
@@ -767,7 +768,7 @@ class GeneralTransitSearch:
 
 
         #Now saving the files
-        self.SavePath = os.path.join(Target.ResultDir, "DiagnosticPlots")
+        self.SavePath = os.path.join(Target.ResultDir, "Periodogram")
         if not(os.path.exists(self.SavePath)):
             os.system("mkdir %s" %self.SavePath)
 
@@ -776,82 +777,3 @@ class GeneralTransitSearch:
         if ShowPlot:
             plt.show()
         plt.close('all')
-
-
-
-    def TLSLikelihood(self, Target, MinPeriod, ShowPlot, SavePlot):
-        '''
-        Performs transit least squares search
-        on the detrended light curve that preserves the transit
-
-        Parameters
-        ------------
-
-        Target: splash target object
-                Target object initiated with a light curve file
-
-        MinPeriod: float
-                Minimum period to search for transit
-
-        ShowPlot: bool
-                Shows the plot if True
-
-        SavePlot: bool
-                 Saves the plot if True under DiagnosticPlots subfolder
-        '''
-
-        #Massage the data
-        YValues = np.abs(self.UnravelMetric)/np.median(self.UnravelMetric)
-
-        plt.figure()
-        plt.subplot(211)
-        plt.plot(self.AllModeledT0, self.UnravelMetric, "ko")
-        plt.subplot(212)
-        plt.plot(self.AllModeledT0, 1.0-YValues/100.0, "ko")
-        plt.show()
-
-        #Find the auto-correlation
-        from scipy.signal import correlate
-
-        Power = correlate(self.UnravelMetric,self.UnravelMetric,mode="same")
-
-        plt.figure()
-        plt.plot(self.AllModeledT0, self.UnravelMetric, "ko")
-        plt.show()
-
-        #Run TLS here
-        model = transitleastsquares(self.AllModeledT0, 1.0-YValues/100.0)
-        model = transitleastsquares(self.AllModeledT0, 1.0-YValues/100.0)
-        #model = transitleastsquares(Target.AllTime[Target.QualityFactor], self.AllDetrendedFlux+1.0)
-
-        results = model.power(
-        period_min=MinPeriod,
-        period_max=Target.AllTime[-1]-Target.AllTime[0],
-        oversampling_factor=5,
-        duration_grid_step=1.02,
-        n_transits_min=1
-        )
-
-
-        fig, ax = plt.subplots(figsize=(20,14), ncols=1, nrows=2)
-        ax2= ax[0].twinx()
-        ax[0].axvline(results.period, alpha=0.4, lw=3)
-        for n in range(2, 5):
-            ax[0].axvline(n*results.period, alpha=0.4, lw=1)
-            ax[0].axvline(results.period / n, alpha=0.4, lw=1,)
-        ax[0].text(max(results.periods)*0.75,max(results.power)*0.95,\
-             "Best Period:"+str(round(results.period,4)))
-        ax[0].set_xlabel('Period (days)', fontsize=20)
-        ax[0].plot(results.periods, results.power, color='red', lw=2.0)
-        ax[0].set_xlim(min(results.periods), max(results.periods))
-        ax2.plot(Target.PhasePeriod, Target.PhaseCoverage, color="green", lw=2)
-
-        ax[0].set_ylabel(r"SDE")
-        ax2.set_ylabel(r"Phase Coverage")
-
-        ax[0].spines['left'].set_color('red')
-        ax[0].spines['right'].set_color('green')
-        ax2.spines['right'].set_color('green')
-        ax2.spines['left'].set_color('red')
-        plt.savefig("TestFig.png")
-        plt.close("all")

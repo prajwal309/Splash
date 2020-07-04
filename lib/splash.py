@@ -11,8 +11,9 @@ from astropy.io import fits
 import matplotlib.pyplot as plt
 
 from .Functions import ReadTxtData, ReadFitsData,\
-     ParseFile, GetID, FindQuality
-
+     ParseFile, GetID, FindQuality, moving_average
+from emcee import EnsembleSampler
+from astropy.timeseries import LombScargle
 
 #formatting for the image
 import matplotlib as mpl
@@ -36,6 +37,20 @@ class Target:
         Expect a continuous data concatenated data with header in the first row.
         First row is expected to be time. Second row is expected to be flux.
 
+
+        Parameters
+        ----------
+        Location: string
+                  path of the
+
+        Name: string
+
+
+        Output: string
+
+
+        Attributes
+        ----------
         ParamName: The name of the parameters.
         ParamValue: The values of the parameters.
         '''
@@ -59,9 +74,13 @@ class Target:
         self.AllFlux = self.ParamValues[:,1]
 
         #Find the id from the database
+        self.Name = Name
         if "Sp" in Name:
             self.SpeculoosID = Name
-            self.GaiaID  = GetID(Name, IdType="SPECULOOS")
+            try:
+                self.GaiaID  = GetID(Name, IdType="SPECULOOS")
+            except:
+                print("Error finding the GAIA ID.")
         elif re.search("[0-9]{17}",Name):
             #GAIA ID is at least 17 digit long
             self.GaiaID = Name
@@ -73,9 +92,11 @@ class Target:
         Output = self.SpeculoosID if not(Output) else Output
         #Generate the output folder
         self.MakeOutputDir(FolderName=Output)
+        self.OutlierLocation = os.path.join(self.ResultDir, "Outliers")
 
         self.DailyData = self.NightByNight()
         self.NumberOfNights = len(self.DailyData)
+
 
         self.Daily_T0_Values = []
         for counter in range(self.NumberOfNights):
@@ -83,14 +104,37 @@ class Target:
 
         self.Daily_T0_Values = np.array(self.Daily_T0_Values)
         #Flag to produce light curves once the data been processed
-        self.Processed = False
         self.QualityFactor = np.ones(len(self.ParamValues[:,0])).astype(np.bool)
+        self.PreCleaned = False
 
         #Break the quality factory into nights
         self.BreakQualityFactor()
         self.PhaseCoverage()
+        self.Day2DayVariance, self.VarianceSeries = self.EstimateVariance()
 
 
+
+
+    def EstimateVariance(self):
+        '''
+        This method find the standard deviation for each night
+
+        Returns
+        -------
+        array, array
+            array of standard deviation value for a night
+            array of standard deviation for a data point
+        '''
+        DailyVariance = []
+        VarianceSeries = []
+        for i in range(self.NumberOfNights):
+            CurrentData = self.DailyData[i]
+            CurrentTime = CurrentData[:,0]
+            CurrentFlux = CurrentData[:,1]
+            _, Variance = moving_average(CurrentFlux, sigma=5, NumPoint=75)
+            DailyVariance.append(np.median(Variance))
+            VarianceSeries.extend(Variance)
+        return np.array(DailyVariance), np.array(VarianceSeries)
 
 
     def NightByNight(self):
@@ -215,7 +259,7 @@ class Target:
             self.QualityFactor[StartIndex:StopIndex] = CurrentQuality
 
             if SavePlot or ShowPlot:
-                T0_Int = round(min(CurrentTime),6)
+                T0_Int = int(min(CurrentTime))
 
                 plt.figure(figsize=(10,8))
                 plt.plot(CurrentTime[CurrentQuality]-T0_Int, CurrentFlux[CurrentQuality], "ko", label="Good Data")
@@ -225,7 +269,6 @@ class Target:
                 plt.legend(loc=1)
                 plt.tight_layout()
                 if SavePlot:
-                    self.OutlierLocation = os.path.join(self.ResultDir, "Outliers")
                     if not(os.path.exists(self.OutlierLocation)):
                         os.system("mkdir %s" %self.OutlierLocation)
                     SaveName = os.path.join(self.OutlierLocation, "Night"+str(NightNumber+1).zfill(4)+".png")
@@ -233,6 +276,26 @@ class Target:
                 if ShowPlot:
                     plt.show()
                 plt.close('all')
+
+
+        #Now remove the bade index of the data
+        self.AllTime = self.AllTime[self.QualityFactor]
+        self.AllFlux = self.AllFlux[self.QualityFactor]
+        self.ParamValues = self.ParamValues[self.QualityFactor]
+
+
+        self.DailyData = self.NightByNight()
+        self.NumberOfNights = len(self.DailyData)
+
+        self.Daily_T0_Values = []
+        for counter in range(self.NumberOfNights):
+            self.Daily_T0_Values.append(int(min(self.DailyData[counter][:,0])))
+
+        self.Daily_T0_Values = np.array(self.Daily_T0_Values)
+        self.Day2DayVariance, self.VarianceSeries = self.EstimateVariance()
+
+        #Flag to produce light curves once the data been processed
+        self.PreCleaned = True
 
 
     def BreakQualityFactor(self):
@@ -291,3 +354,144 @@ class Target:
                 self.PhaseCoverage[Count] -= PhaseUncovered/Period
 
         self.PhaseCoverage*=100.
+
+
+
+    def PreWhitening(self, NCases=None, SavePlot=True, ShowPlot=False):
+        '''
+        The prewhitening is able to re-iteratively  fit out any sinusoidal signal.
+
+        Parameters
+        ----------
+
+        NCases: integer
+                Fit for Number of cases. Default is None
+
+        SavePlot: boolean
+                  Saves the Diagnostic Plot if toggled on. Default Value is True
+
+        ShowPlot: boolean
+                  Shows the Diagnostic plot if toggled on. Default Value is False
+
+        '''
+        TargetTime = self.AllTime
+        TargetFlux = self.AllFlux
+
+        if not(os.path.exists(self.OutlierLocation)):
+            os.system("mkdir %s" %self.OutlierLocation)
+
+
+        self.CorrectedFlux = np.copy(TargetFlux)
+
+        self.RemoveCase = 1
+        while True:
+
+            Freq, LS_Power = LombScargle(self.AllTime, self.CorrectedFlux).autopower()
+            #Fit for a single one recursively for prewhitening...
+            LS_Period = 1./Freq
+
+            #Consider period less between 1 hours and days
+            SelectIndex = np.logical_and(LS_Period>1./24., LS_Period<10.0)
+
+            LS_Period = LS_Period[SelectIndex]
+            LS_Power = LS_Power[SelectIndex]
+
+            MaxPowerLocation = np.argmax(LS_Power)
+            self.CurrentPeriod = LS_Period[MaxPowerLocation]
+            MaxPowerValue = LS_Power[MaxPowerLocation]
+
+            SNR_Power = MaxPowerValue/np.mean(LS_Power)
+
+            if not(NCases) and (MaxPowerValue<0.15 or SNR_Power<15.0 or self.RemoveCase>5):
+                break
+                
+            elif NCases:
+                if NCases>=self.RemoveCase:
+                    break
+
+
+
+
+            def Likelihood(theta):
+                '''
+                Likelihood
+
+                '''
+
+                Amp, T0, Period = theta
+
+                if T0<0.0 or T0>self.CurrentPeriod:
+                    return -np.inf
+
+                if Period<0.75*self.CurrentPeriod or Period>1.25*self.CurrentPeriod:
+                    return -np.inf
+
+                Model  = Amp*np.sin(2.0*np.pi*(self.AllTime-T0)/Period)
+                #sub
+                Residual = np.power(self.CorrectedFlux - Model,2)/self.VarianceSeries
+
+                Value = -(0.5*np.sum(Residual))
+
+                return Value
+
+            print("subtract the mean value for each night")
+            for i in range(self.NumberOfNights):
+                StartIndex, StopIndex = self.NightLocations[i]
+
+                self.CorrectedFlux[StartIndex:StopIndex] -= np.mean(self.CorrectedFlux[StartIndex:StopIndex])
+
+
+            #Now fit for power
+            self.BestResidual = np.inf
+            nWalkers = 30
+            Amp_Init = np.random.uniform(0.01,0.01, nWalkers)
+            T0_Init = np.random.uniform(0,self.CurrentPeriod, nWalkers)
+            Period_Init = np.random.uniform(0.8*self.CurrentPeriod, 1.2*self.CurrentPeriod, nWalkers)
+            StartingGuess = np.column_stack((Amp_Init, T0_Init, Period_Init))
+
+            _, NDim = np.shape(StartingGuess)
+
+            sampler = EnsembleSampler(nWalkers, NDim, Likelihood, args=[], threads=8)
+            state = sampler.run_mcmc(StartingGuess, 3000,  progress=True)
+
+
+
+            #Find the best value and cancel it
+            Probability = sampler.lnprobability
+            X,Y = np.where(Probability==np.max(Probability))
+            BestTheta = sampler.chain[X[0],Y[0],:]
+            BestAmp, BestT0, BestPeriod = BestTheta
+            BestModel = BestAmp*np.sin(2.0*np.pi*(self.AllTime-BestT0)/BestPeriod)
+
+            plt.figure(figsize=(14,14))
+            plt.subplot(311)
+            plt.plot(LS_Period, LS_Power, "ko")
+            plt.axvline(x=self.CurrentPeriod)
+            plt.xscale("log")
+            plt.ylabel("Lombscargle Power")
+            plt.xlabel("Period")
+            TitleText = "Period:" + str(round(self.CurrentPeriod,5))
+            plt.title(TitleText)
+            plt.subplot(312)
+            plt.plot(self.AllTime, self.CorrectedFlux, "ko", label="Original Flux")
+            plt.plot(self.AllTime, BestModel, "r-", label="Best Fit Model")
+            plt.xlabel("Time (JD)", fontsize=20)
+            plt.ylabel("Normalized Flux", fontsize=20)
+            plt.legend()
+            plt.subplot(313)
+            plt.plot(self.AllTime, self.CorrectedFlux - BestModel, "ko")
+            plt.xlabel("Time (JD)", fontsize=20)
+            plt.ylabel("Corrected Flux", fontsize=20)
+            plt.tight_layout()
+
+            if SavePlot:
+                SaveName = "SinusoidalFit_Case"+ str(self.RemoveCase).zfill(3)+".png"
+                plt.savefig(os.path.join(self.OutlierLocation, SaveName))
+            if ShowPlot:
+                plt.show()
+
+
+            self.CorrectedFlux-= BestModel
+            self.ParamValues[:,1]-=BestModel
+            self.AllFlux-= BestModel
+            self.RemoveCase+=1

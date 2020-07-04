@@ -104,7 +104,7 @@ class TransitFit:
                   Number of cases to be considered
 
         '''
-        if (TransitSearch.TransitPair_Status):
+        if (TransitSearch.TransitMatch_Status):
             self.AllCurrentT0s =  TransitSearch.T0s
             self.AllCurrentPeriods = TransitSearch.TP_Periods
 
@@ -119,7 +119,7 @@ class TransitFit:
             self.FittedPeriod = []
 
             #Run until number of N best cases are fit or all the cases are adequately considered from SDE.
-            while self.CaseNumber<NumFits or len(self.AllCurrentSDE)<1:
+            while self.CaseNumber<=NumFits or len(self.AllCurrentSDE)<1:
                 SelectIndex = np.argmax(self.AllCurrentSDE)
                 self.CurrentT0 = self.AllCurrentT0s[SelectIndex]
                 self.CurrentPeriod = self.AllCurrentPeriods[SelectIndex]
@@ -128,25 +128,27 @@ class TransitFit:
                 self.FittedPeriod.append(self.CurrentPeriod)
 
                 #Data length = 1.5 hours around transit
-                SelectDataIndex = np.abs((Target.AllTime[Target.QualityFactor] -self.CurrentT0 +TDur/2.)%self.CurrentPeriod)<TDur
+                SelectDataIndex = np.abs((Target.AllTime -self.CurrentT0 +TDur/2.)%self.CurrentPeriod)<TDur
 
                 #################################################
-                self.SelectedTime = Target.AllTime[Target.QualityFactor][SelectDataIndex]
-                self.SelectedFlux = Target.AllFlux[Target.QualityFactor][SelectDataIndex]
-                self.SelectedData = Target.ParamValues[Target.QualityFactor][SelectDataIndex]
+                self.SelectedTime = Target.AllTime[SelectDataIndex]
+                self.SelectedFlux = Target.AllFlux[SelectDataIndex]
+                self.SelectedData = Target.ParamValues[SelectDataIndex]
 
 
                 self.numDataPoints = len(self.SelectedTime)
 
                 #Find the night number()
                 self.GetNightNumber(Target)
+
+                print("Now running MCMC for:", self.CaseNumber)
                 self.QuickFit(Target, TransitSearch)
 
                 #Fit only if greater than 10
                 #Remove certain values around the peak and its harmonic
                 self.RemoveIndex = np.zeros(len(self.AllCurrentSDE)).astype(np.bool)
                 while self.CurrentPeriod/HarmonicNum>TransitSearch.MinPeriod:
-                    self.CurrentRemoveIndex = np.abs(self.AllCurrentPeriods -self.CurrentPeriod/HarmonicNum)<0.025
+                    self.CurrentRemoveIndex = np.abs(self.AllCurrentPeriods -self.CurrentPeriod/HarmonicNum)<0.070
                     self.RemoveIndex = np.logical_or(self.RemoveIndex, self.CurrentRemoveIndex)
                     HarmonicNum+=1
 
@@ -195,10 +197,10 @@ class TransitFit:
         if a_Rs<3.0:
             return -np.inf
 
-        if Rp_Rs<0.0025 or Rp_Rs>0.30:
+        if Rp_Rs<0.000 or Rp_Rs>0.30:
             return -np.inf
 
-        if max(np.abs(theta[6:]))>1e6:
+        if max(np.abs(theta[6:]))>1e7:
             return -np.inf
 
 
@@ -287,7 +289,7 @@ class TransitFit:
                 AssignCol += 2
             StartIndex = StopIndex
 
-        nWalkers = 100
+        nWalkers = int(NCols*8)+20
 
         self.Parameters = ["T0", "Period", "a_Rs", "Rp_Rs", "b", "q1", "q2"]
 
@@ -383,7 +385,24 @@ class TransitFit:
         FoldedTime, FoldedModel = fold_data(self.SelectedTime -BestMCMCT0+ BestMCMCPeriod/2.0, TransitModelFlux, BestMCMCPeriod)
         FoldedErrors = FoldedFlux - FoldedModel
 
+        #Corner plot
+        CornerPlotData = sampler.chain[:,self.NRuns//2:,:]
+        X,Y,Z = np.shape(CornerPlotData)
+        CornerPlotData = CornerPlotData.reshape(X*Y,Z)
 
+
+        #Construct a corner plot
+        #corner.corner(CornerPlotData, quantiles=[0.16, 0.5, 0.84])
+
+        #SaveName = str(self.CaseNumber).zfill(3)+"_CornerPlot"".png"
+        #if self.SavePlot:
+        #    plt.savefig(os.path.join(self.SaveLocation , SaveName))
+        #if self.ShowPlot:
+        #        plt.show()
+        #plt.close('all')
+
+
+        #Now the main figure
         NBins = int((FoldedTime[-1]-FoldedTime[0])*60.0*24./(5.0))
         NData = len(FoldedTime)/NBins
 
@@ -391,14 +410,20 @@ class TransitFit:
         BinnedFlux = binned_statistic(FoldedTime, FoldedFlux, bins=NBins)[0]
         BinnedError = RunningResidual(FoldedTime, FoldedErrors, NBins)
 
-        TitleText = "T0: "+ str(round(BestMCMCT0,5)) +"\n"+" Period: "+ str(round(BestMCMCPeriod,5))
 
 
-        print("Saving result from the first MCMC result")
-
-
+        print("Saving figures from the MCMC")
 
         T0Subtract =  BestMCMCPeriod/2.0
+
+        T0Error = np.std(CornerPlotData[:,0])
+        PeriodError = np.std(CornerPlotData[:,1])
+        Rp_RsError = np.std(CornerPlotData[:,3])
+
+        TitleText = "T0: "+ str(round(BestMCMCT0,5)) + "$\pm$"  + str(round(T0Error,5)) + "\n"+ \
+                    "Period: "+ str(round(BestMCMCPeriod,5))+ "$\pm$"  + str(round(PeriodError,5)) + "\n"+ \
+                    "Rp_Rs: "+ str(round(Rp_Rs,5))+ "$\pm$"  + str(round(Rp_RsError,5))
+
         plt.figure(figsize=(14,10))
         plt.plot((FoldedTime-T0Subtract)*24.0, FoldedFlux, color="silver", marker="o", \
                 markersize=2, linestyle="None", zorder=1, label="Detrended Data")
@@ -415,18 +440,7 @@ class TransitFit:
             plt.show()
         plt.close('all')
 
-        #Corner plot
-        CornerPlotData = sampler.chain[:,self.NRuns//2:,:]
-        X,Y,Z = np.shape(CornerPlotData)
-        CornerPlotData = CornerPlotData.reshape(X*Y,Z)
-        corner.corner(CornerPlotData, quantiles=[0.16, 0.5, 0.84])
 
-        SaveName = str(self.CaseNumber).zfill(3)+"_CornerPlot"".png"
-        if self.SavePlot:
-            plt.savefig(os.path.join(self.SaveLocation , SaveName))
-        if self.ShowPlot:
-            plt.show()
-        plt.close('all')
 
 
         #Save number of fits for individual nights
