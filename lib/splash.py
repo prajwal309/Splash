@@ -384,14 +384,13 @@ class Target:
         self.CorrectedFlux = np.copy(TargetFlux)
 
         self.RemoveCase = 1
-        while True:
 
+        while True:
             Freq, LS_Power = LombScargle(self.AllTime, self.CorrectedFlux).autopower()
-            #Fit for a single one recursively for prewhitening...
             LS_Period = 1./Freq
 
-            #Consider period less between 1 hours and days
-            SelectIndex = np.logical_and(LS_Period>1./24., LS_Period<10.0)
+            #Consider period less between 0.5 hours and days
+            SelectIndex = np.logical_and(LS_Period>0.5/24., LS_Period<10.0)
 
             LS_Period = LS_Period[SelectIndex]
             LS_Power = LS_Power[SelectIndex]
@@ -402,20 +401,19 @@ class Target:
 
             SNR_Power = MaxPowerValue/np.mean(LS_Power)
 
-            if not(NCases) and (MaxPowerValue<0.15 or SNR_Power<15.0 or self.RemoveCase>5):
+            #Cases for breaking from the loop
+            if not(NCases) and (MaxPowerValue<0.10 or SNR_Power<15.0 or self.RemoveCase>5):
                 break
-                
+
             elif NCases:
                 if NCases>=self.RemoveCase:
                     break
 
-
-
+            print("Now removing %s prominent signal from flux." %self.RemoveCase)
 
             def Likelihood(theta):
                 '''
-                Likelihood
-
+                Likelihood for fitting a sinudodal
                 '''
 
                 Amp, T0, Period = theta
@@ -427,17 +425,14 @@ class Target:
                     return -np.inf
 
                 Model  = Amp*np.sin(2.0*np.pi*(self.AllTime-T0)/Period)
-                #sub
                 Residual = np.power(self.CorrectedFlux - Model,2)/self.VarianceSeries
-
                 Value = -(0.5*np.sum(Residual))
 
                 return Value
 
-            print("subtract the mean value for each night")
+            #subtracting the mean value for each night
             for i in range(self.NumberOfNights):
                 StartIndex, StopIndex = self.NightLocations[i]
-
                 self.CorrectedFlux[StartIndex:StopIndex] -= np.mean(self.CorrectedFlux[StartIndex:StopIndex])
 
 
@@ -493,5 +488,8 @@ class Target:
 
             self.CorrectedFlux-= BestModel
             self.ParamValues[:,1]-=BestModel
-            self.AllFlux-= BestModel
+            self.AllFlux -= BestModel
+            self.DailyData = self.NightByNight()
+
+
             self.RemoveCase+=1

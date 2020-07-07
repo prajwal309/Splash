@@ -50,10 +50,8 @@ class TransitFit:
                 Shows the plot if True
 
         '''
-        #Convert from
-
-
-        TDur=TDur/24.0
+        #Convert from from Hours to Days
+        self.TDur=TDur/24.0
         self.Tolerance = 0.025
         self.NRuns = int(NRuns)
         self.ShowPlot = ShowPlot
@@ -127,8 +125,12 @@ class TransitFit:
                 self.FittedT0.append(self.CurrentT0)
                 self.FittedPeriod.append(self.CurrentPeriod)
 
+                #In order to address problem with negative numbers
+                if self.CurrentT0>np.min(Target.AllTime):
+                    self.CurrentT0-=self.CurrentPeriod
+
                 #Data length = 1.5 hours around transit
-                SelectDataIndex = np.abs((Target.AllTime -self.CurrentT0 +TDur/2.)%self.CurrentPeriod)<TDur
+                SelectDataIndex = np.abs((Target.AllTime -self.CurrentT0 +self.TDur/2.)%self.CurrentPeriod)<self.TDur
 
                 #################################################
                 self.SelectedTime = Target.AllTime[SelectDataIndex]
@@ -425,11 +427,15 @@ class TransitFit:
                     "Rp_Rs: "+ str(round(Rp_Rs,5))+ "$\pm$"  + str(round(Rp_RsError,5))
 
         plt.figure(figsize=(14,10))
-        plt.plot((FoldedTime-T0Subtract)*24.0, FoldedFlux, color="silver", marker="o", \
+        plt.plot((FoldedTime-T0Subtract)*24.0, FoldedFlux, color="cyan", marker="o", \
                 markersize=2, linestyle="None", zorder=1, label="Detrended Data")
         plt.errorbar((BinnedTime-T0Subtract)*24.0, BinnedFlux, yerr=BinnedError, linestyle="None", \
                      marker="o", markersize=5, capsize=3, elinewidth=2, color="black", zorder=2, label="Binned Data")
         plt.plot((FoldedTime-T0Subtract)*24.0, FoldedModel, "r-", lw=3, label="Model")
+        plt.axvline(x=0, color="red", linestyle="-", label="T0")
+        YLower, YUpper = np.percentile(FoldedFlux, [2.0, 98.0])
+        plt.legend(loc=1)
+        plt.ylim([YLower, YUpper])
         plt.ylabel("Normalized Flux", fontsize=20)
         plt.xlabel("Hours since Mid Transit ", fontsize=20)
         plt.title(TitleText)
@@ -453,18 +459,32 @@ class TransitFit:
 
              Time2Plot = self.SelectedTime[StartIndex:StopIndex]
              Flux2Plot = DetrendedFlux[StartIndex:StopIndex]
-             Model2Plot = ModelFlux[StartIndex:StopIndex]
+             Model2Plot = TransitModelFlux[StartIndex:StopIndex]
+             Error2Plot = Flux2Plot - Model2Plot
 
+             NBins = int((Time2Plot[-1]-Time2Plot[0])*60.0*24./(5.0))
+
+
+             if NBins>2:
+                 BinnedTime = binned_statistic(Time2Plot, Time2Plot, bins=NBins)[0]
+                 BinnedFlux = binned_statistic(Time2Plot, Flux2Plot, bins=NBins)[0]
+                 BinnedError = RunningResidual(Time2Plot, Error2Plot, NBins)
 
              T0Int = int(min(Time2Plot))
              SaveName = "Case"+str(self.CaseNumber).zfill(3)+"_"+str(T0Int) +".png"
 
              plt.figure(figsize=(14,8))
-             plt.plot(Time2Plot-T0Int, Flux2Plot, "ko", label="Data")
-             plt.plot(Time2Plot-T0Int, Model2Plot, "r-", label="Model")
+             plt.plot(Time2Plot-T0Int, Flux2Plot, marker="o", color="cyan", \
+                      linestyle="None", label="Data")
+             plt.errorbar(BinnedTime-T0Int, BinnedFlux, yerr=BinnedError, linestyle="None", \
+                          marker="o", markersize=5, capsize=3, elinewidth=2, color="black", zorder=2, label="Binned Data")
+             plt.plot(Time2Plot-T0Int, Model2Plot, "r-", lw=2, label="Model")
+
+             YLower, YUpper = np.percentile(Flux2Plot, [2.0, 98.0])
+             plt.ylim([YLower, YUpper])
              plt.ylabel("Normalized Flux", fontsize=20)
              plt.xlabel("JD %s" %(T0Int), fontsize=20)
-             plt.legend()
+             plt.legend(loc=1)
 
              if self.SavePlot:
                  plt.savefig(os.path.join(self.SaveLocation , SaveName))

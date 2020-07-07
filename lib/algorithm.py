@@ -710,10 +710,9 @@ class GeneralTransitSearch:
 
         results = model.power(
         period_min=MinPeriod,
-        period_max=(Target.AllTime[-1]-Target.AllTime[0]),
         oversampling_factor=15,
         duration_grid_step=1.02,
-        n_transits_min=1,
+        n_transits_min=2,
         Mstar=0.15,
         Rstar=0.15
         )
@@ -724,11 +723,12 @@ class GeneralTransitSearch:
         for n in range(2, 5):
             ax[0].axvline(n*results.period, alpha=0.4, lw=1)
             ax[0].axvline(results.period / n, alpha=0.4, lw=1,)
-        ax[0].text(min([25,max(results.periods)*0.80]), max(results.power)*0.95,\
-             "Period:"+str(round(results.period,4)))
+        ax[0].text(min([25,max(results.periods)*0.90]), max(results.power)*0.95,\
+             "Period:"+str(round(results.period,4)), fontsize=20)
         ax[0].set_xlabel('Period (days)', fontsize=20)
         ax[0].plot(results.periods, results.power, color='red', lw=2.0)
         ax[0].set_xlim(min(results.periods), min([max(results.periods),25.0]))
+        ax[0].set_ylim([-0.5, max(results.power)*1.05])
         ax2.plot(Target.PhasePeriod, Target.PhaseCoverage, color="green", lw=2)
 
         ax[0].set_ylabel(r"SDE", color="red", fontsize=20)

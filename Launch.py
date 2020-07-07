@@ -54,7 +54,7 @@ print("Now running :", CurrentTarget.Name)
 CurrentTarget.PreClean(CutOff=5, NIter=2, Columns=-1, \
               MinDataCount=75, SavePlot=True)
 
-CurrentTarget.PreWhitening(SavePlot=True, ShowPlot=False)
+#CurrentTarget.PreWhitening(SavePlot=True, ShowPlot=False)
 
 SVDSearch = GeneralTransitSearch()
 SVDSearch.Run(CurrentTarget, SavePlot=True)
@@ -70,8 +70,8 @@ SVDSearch.PeriodicSearch(CurrentTarget, method="TransitMatch", \
 ShowPlot=False, SavePlot=True)
 
 
-TransitFit(CurrentTarget, SVDSearch, NRuns=10000, NumFits=5, \
-           TDur=1.5, Tolerance=0.035)
+TransitFit(CurrentTarget, SVDSearch, NRuns=5000, NumFits=5, \
+           TDur=2.5, Tolerance=0.050)
 
 #TransitFit(CurrentTarget, SVDSearch, NRuns=1500, NumFits=CurrentTarget.NumberOfNights, \
 #           TDur=2.5, Tolerance=0.035)
