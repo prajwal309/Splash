@@ -25,7 +25,7 @@ def fold_data(Time , Flux, Period):
   Function to fold the time, and flux for a given period
 
   Parameters
-  -------------
+  ----------
   Time: numpy array
         Time series as a numpy array
 
@@ -36,7 +36,7 @@ def fold_data(Time , Flux, Period):
         The value of period to which data is folded
 
   Returns
-  ----------
+  -------
   array, array
         Arranged index of
   '''

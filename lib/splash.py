@@ -9,6 +9,8 @@ from time import time
 import numpy as np
 from astropy.io import fits
 import matplotlib.pyplot as plt
+from scipy.signal import medfilt
+
 
 from .Functions import ReadTxtData, ReadFitsData,\
      ParseFile, GetID, FindQuality, moving_average
@@ -313,8 +315,8 @@ class Target:
         This function calculates the phase coverage of the data
 
         ################################
-        Parameters:
-        =================
+        Parameters
+        -----------
         PLow: float
               Lowest Period to consider
 
@@ -354,6 +356,182 @@ class Target:
                 self.PhaseCoverage[Count] -= PhaseUncovered/Period
 
         self.PhaseCoverage*=100.
+
+
+
+
+    def N_PhaseCoverage(self, N=2, PeriodMin=0.5, PeriodMax=np.nan, PeriodStepSize=0.005):
+      '''
+      Time series: an array of values
+
+      N: integer
+         Number of transit to be observed
+
+      PeriodMin:float
+                Minimum period to look for the phase coverage
+
+      PeriodMax: float
+                Maximum value of the period to consider for the phase coverage
+
+      PeriodStepSize: float
+                    Period size for the period for which the data is incomplete...
+      '''
+      TimeSeries = self.AllTime
+      if np.isnan(PeriodMax):
+          PeriodMax = (TimeSeries[-1] - TimeSeries[0])
+
+      AllPeriod = np.arange(PeriodMin, PeriodMax, PeriodStepSize)
+
+      PhaseCoverageArray = np.zeros(len(AllPeriod))
+
+
+
+      def CheckOverlap(Item1, Item2):
+          '''
+          Function that checks if there is overlap between two phase ranges
+
+          Item1: [float, float]
+                  Phase range for the first case
+
+          Item2: [float, float]
+                 Phase range for the second case
+          '''
+          L1,U1 = Item1
+          L2,U2 = Item2
+          if U1<L2:
+              return False
+          elif U2<L1:
+              return False
+          else:
+              return True
+
+
+      for PeriodCounter, Period in enumerate(AllPeriod):
+          Phase = TimeSeries%Period
+          Phase=Phase/Period
+          BreakLocations = list(np.where(np.abs(np.diff(Phase))>0.005/Period)[0])
+          BreakLocations.append(len(TimeSeries)-1)
+
+          StartIndex = 0
+          PhaseCoverage = []
+          for Counter,StopIndex in enumerate(BreakLocations):
+              StartValue = Phase[StartIndex]
+              StopValue = Phase[StopIndex]
+
+              if StartValue<StopValue:
+                  PhaseCoverage.append([Phase[StartIndex], Phase[StopIndex]])
+              else:
+                  PhaseCoverage.append([Phase[StartIndex], 1.0])
+                  PhaseCoverage.append([0.0, Phase[StopIndex]])
+              StartIndex = StopIndex+1
+
+          PhaseCoveredValues = {}
+          for i in range(N):
+              PhaseCoveredValues[i]=[[0,0]]
+
+          for LeftOver in PhaseCoverage:
+              PhaseIndex = 0
+              while PhaseIndex<N and LeftOver:
+
+                  ComparisonValues = PhaseCoveredValues[PhaseIndex]
+                  NComponents = len(ComparisonValues)
+
+                  LowerValue,UpperValue=LeftOver
+                  for CompCounter, CurrentCompValue in enumerate(ComparisonValues):
+
+                      CompLower, CompUpper = CurrentCompValue
+                      if CompCounter==0:
+                          LeftOver = [LowerValue,UpperValue]
+
+                      OverlapStatus=CheckOverlap(CurrentCompValue, LeftOver)
+
+                      if OverlapStatus:
+
+                          ReplaceValue = [min([LowerValue, CompLower]),max([UpperValue, CompUpper])]
+                          LeftOver = [max([LowerValue, CompLower]),min([UpperValue, CompUpper])]
+                          PhaseCoveredValues[PhaseIndex][CompCounter] = ReplaceValue
+                          break
+
+                      if not(OverlapStatus) and CompCounter==NComponents-1:
+                          #print("In appending branch...")
+                          PhaseCoveredValues[PhaseIndex].append(LeftOver)
+                          LeftOver = None
+                          break
+
+
+                  PhaseIndex+=1
+
+
+                  #Arrange in ascending order
+                  for counter in range(N):
+                     Values = np.array(PhaseCoveredValues[counter])
+                     FirstValues = [x for x,y in Values]
+                     ArrangeIndex = np.argsort(FirstValues)
+                     ArrangeValues = Values[ArrangeIndex]
+                     PhaseCoveredValues[counter]=list(ArrangeValues)
+
+
+                  #Check if overlapping current dictionary
+                  for counter in range(N):
+                     InnerCounter = 0
+                     while InnerCounter<len(PhaseCoveredValues[counter])-1:
+
+                       OverlapStatus = CheckOverlap(PhaseCoveredValues[counter][InnerCounter],PhaseCoveredValues[counter][InnerCounter+1])
+                       if OverlapStatus:
+
+                           L1, U1 = PhaseCoveredValues[counter][InnerCounter]
+                           L2, U2 = PhaseCoveredValues[counter][InnerCounter+1]
+                           TempReplaceValue = np.array([min([L1,L2]),max([U1,U2])])
+                           TempLeftOver = [max([L1,L2]),min([U1,U2])]
+
+                           PhaseCoveredValues[counter].pop(InnerCounter)
+                           PhaseCoveredValues[counter][InnerCounter] = TempReplaceValue
+                           PhaseCoverage.append(TempLeftOver)
+
+                       InnerCounter+=1
+
+
+          for counter in range(N):
+               Values = np.array(PhaseCoveredValues[counter])
+               FirstValues = [x for x,y in Values]
+               ArrangeIndex = np.argsort(FirstValues)
+               ArrangeValues = Values[ArrangeIndex]
+               PhaseCoveredValues[counter]=list(ArrangeValues)
+
+          #Arrange in ascending order
+          for counter in range(N):
+                Values = np.array(PhaseCoveredValues[counter])
+                FirstValues = [x for x,y in Values]
+                ArrangeIndex = np.argsort(FirstValues)
+                ArrangeValues = Values[ArrangeIndex]
+                PhaseCoveredValues[counter]=list(ArrangeValues)
+
+
+
+          CurrentPhaseCoverageValue = 0
+          BreakStatus= False
+          while not(BreakStatus):
+              LowerValue = -np.inf
+              UpperValue = np.inf
+
+              for counter in range(N):
+                  LowerValue = max([LowerValue,PhaseCoveredValues[counter][0][0]])
+                  UpperValue = min([UpperValue,PhaseCoveredValues[counter][0][1]])
+                  if PhaseCoveredValues[counter][0][1]>UpperValue:
+                      PhaseCoveredValues[counter][0][0]=UpperValue
+
+
+              if UpperValue>LowerValue:
+                  CurrentPhaseCoverageValue+=UpperValue-LowerValue
+
+              for counter in range(N):
+                  if PhaseCoveredValues[counter][0][1]<=UpperValue:
+                      PhaseCoveredValues[counter].pop(0)
+                  if len(PhaseCoveredValues[counter])==0:
+                      BreakStatus = True
+          PhaseCoverageArray[PeriodCounter]=CurrentPhaseCoverageValue
+      PhaseCoverageArray = medfilt(PhaseCoverageArray,5)*100.0
+      return AllPeriod, PhaseCoverageArray
 
 
 

@@ -13,16 +13,12 @@ from scipy.stats import binned_statistic
 
 from .Functions import fold_data, RunningResidual
 
-class TransitFit:
-    """
-    Description
-    -----------
 
-    Parameters Name
-    --------------
-    """
+
+class GeneralTransitFit:
+
     def __init__(self, Target, TransitSearch, NumFits=3, TDur=1.5, NRuns=5000, \
-                Tolerance=None, ShowPlot=False, SavePlot=True):
+                method="MCMC", Tolerance=None, ShowPlot=False, SavePlot=True):
         '''
         This uses the thing from results from the target as well as Transit Search
 
@@ -34,8 +30,13 @@ class TransitFit:
         TransitSearch: Transit Search Object
                         Object that provides access to the transit search algorithm performed
                         on the light curve
+
+        NumFits: Integer
+                Number of transit case to be connsidered
+
         TDur: float
             points around the transit to fit.
+
 
         NRuns: int
                 Number of steps for running MCMC
@@ -174,7 +175,13 @@ class TransitFit:
         '''
         This is likelihood function along with the
 
-        theta: list of fit Parameter. First six are T0, Period, a_Rs, Rp_Rs, b, q1 and q2
+        Parameters:
+        -----------
+        theta: list
+                list of fit Parameters. First six are T0, Period, a_Rs, Rp_Rs, b, and u.
+
+        params: batman transit class
+                Batman is initialized outside the function to improve the speed.
 
         '''
         T0 = theta[0]
@@ -493,3 +500,14 @@ class TransitFit:
              plt.close('all')
 
              StartIndex = StopIndex
+
+
+
+
+class SpecialTransitFit:
+    def __init__():
+        '''
+        Give T0 and period and fit for the transit
+        '''
+        def __init__(self, Target, TransitSearch, Period=np.nan, TDur=1.5, NRuns=5000, \
+                    method="MCMC", Tolerance=None, ShowPlot=False, SavePlot=True):
